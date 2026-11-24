@@ -129,7 +129,13 @@ impl Upstream {
     }
 }
 
+/// The name of agent-browser's upstream server.
+const BROWSER: &str = "agent-browser";
+
 struct Server {
+    /// The dedicated Chrome and proxy of agent-browser's server, started at
+    /// its first tool call that needs a page.
+    browser: Option<agent_record_browser::LazyBrowser>,
     upstreams: Vec<Arc<Upstream>>,
     ours: Vec<catalog::Tool>,
     globals: Vec<String>,
@@ -154,13 +160,20 @@ pub(crate) fn serve(args: &[String]) -> ExitCode {
         Ok(upstream) => upstreams.push(upstream),
         Err(message) => notes.push(message),
     }
-    match agent_record_browser::mcp_command()
-        .and_then(|command| Upstream::spawn("agent-browser", command, Arc::clone(&out)))
-    {
-        Ok(upstream) => upstreams.push(upstream),
+    // agent-browser's server starts now, its browser only at the first web
+    // tool call: an agent that never opens a page never sees a Chrome.
+    let mut browser = None;
+    match agent_record_browser::mcp_command().and_then(|(command, lazy)| {
+        Upstream::spawn(BROWSER, command, Arc::clone(&out)).map(|upstream| (upstream, lazy))
+    }) {
+        Ok((upstream, lazy)) => {
+            upstreams.push(upstream);
+            browser = Some(lazy);
+        }
         Err(message) => notes.push(format!("Web page tools are not available: {message}")),
     }
     let server = Arc::new(Server {
+        browser,
         upstreams,
         ours: catalog::tools()
             .into_iter()
@@ -240,7 +253,7 @@ impl Server {
         json!({
             "protocolVersion": protocol,
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "agent-record", "version": env!("CARGO_PKG_VERSION") },
+            "serverInfo": { "name": "desktop-recorder", "version": env!("CARGO_PKG_VERSION") },
             "instructions": instructions.join("\n\n"),
         })
     }
@@ -298,7 +311,18 @@ impl Server {
             }
         };
         match index.and_then(|index| self.upstreams.get(index)) {
-            Some(upstream) => upstream.request("tools/call", params),
+            Some(upstream) => {
+                if upstream.name == BROWSER
+                    && agent_record_browser::tool_needs_browser(&name)
+                    && let Some(browser) = &self.browser
+                    && let Err(message) = browser.ensure()
+                {
+                    return Ok(tool_error(&format!(
+                        "The browser could not start: {message}"
+                    )));
+                }
+                upstream.request("tools/call", params)
+            }
             None => Ok(tool_error(&format!("Unknown tool '{name}'"))),
         }
     }

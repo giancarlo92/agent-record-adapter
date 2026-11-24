@@ -6,7 +6,7 @@
 # Usage: browser-record-test.sh <agent-record.exe> <agent-browser.exe> <signup-v1.html path>
 set -u
 AD="$1"; export AGENT_RECORD_BROWSER_BIN="$(cygpath -w "$2")"; FORM="$3"
-export AGENT_DESKTOP_HOME="$LOCALAPPDATA/AgentRecordAdapter/tmp/js-state" AGENT_RECORD_CHROME_PORT=9433 AGENT_RECORD_CHROME_HEADLESS=1
+export AGENT_DESKTOP_HOME="$LOCALAPPDATA/DesktopRecorder/tmp/js-state" AGENT_RECORD_CHROME_PORT=9433 AGENT_RECORD_CHROME_HEADLESS=1
 D="$USERPROFILE/AprendeReplica-e2e/enter-test"; OUT="$D/browser-agent.jsonl"; rm -f "$OUT"
 "$AD" browser open "file:///$(cygpath -m "$FORM")" >/dev/null 2>&1
 "$AD" browser snapshot -i >/dev/null 2>&1

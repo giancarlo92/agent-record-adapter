@@ -4,7 +4,7 @@
 # Usage: file-pick-test.sh <agent-record.exe> [keep]
 set -u
 AD="$1"; KEEP="${2:-}"
-export AGENT_DESKTOP_HOME="$LOCALAPPDATA/AgentRecordAdapter/tmp/js-state" TEMP="$LOCALAPPDATA/AgentRecordAdapter/tmp" TMP="$LOCALAPPDATA/AgentRecordAdapter/tmp"
+export AGENT_DESKTOP_HOME="$LOCALAPPDATA/DesktopRecorder/tmp/js-state" TEMP="$LOCALAPPDATA/DesktopRecorder/tmp" TMP="$LOCALAPPDATA/DesktopRecorder/tmp"
 D="$USERPROFILE/AprendeReplica-e2e/enter-test"; WD=$(cygpath -w "$D"); F="$D/fp-snap.json"; OUT="$D/file-pick.jsonl"; rm -f "$OUT"
 q() { node -e "$1" "$(cygpath -w "$F")" "${@:2}"; }
 findref() { q "const o=require(process.argv[1]);const re=new RegExp(process.argv[3]);let h='';(function w(n){if(!n||h)return;if(n.role===process.argv[2]&&re.test(n.name||'')&&n.ref_id)h=n.ref_id;(n.children||[]).forEach(w)})(o.data&&o.data.tree);console.log(h)" "$1" "$2"; }

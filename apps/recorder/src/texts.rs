@@ -23,6 +23,10 @@ pub struct Texts {
     pub none_yet: &'static str,
     pub nothing_recorded: &'static str,
     pub irreversible: &'static str,
+    /// Above the steps of a recording, to mark the clicks that ask before they run.
+    pub mark_hint: &'static str,
+    /// Shown on a recording's line: click it to see its steps.
+    pub show_steps: &'static str,
     pub run: &'static str,
     pub cancel: &'static str,
     pub repair: &'static str,
@@ -63,6 +67,8 @@ const EN: Texts = Texts {
     none_yet: "Your recordings show up here.",
     nothing_recorded: "Nothing was done in what was recorded.",
     irreversible: "It clicks something that can't be undone:",
+    mark_hint: "Tick the clicks that ask before they run:",
+    show_steps: "Show its steps",
     run: "Play it",
     cancel: "Cancel",
     repair: "Repair with AI",
@@ -76,7 +82,7 @@ const EN: Texts = Texts {
     updating: "Updating...",
     update_failed: "The update failed:",
     spanish: false,
-    no_tool: "agent-record is missing: run npx agent-record-adapter",
+    no_tool: "agent-record is missing: run npx desktop-recorder-mcp",
     saving: "Saving...",
 };
 
@@ -102,6 +108,8 @@ const ES: Texts = Texts {
     none_yet: "Aquí aparecen tus grabaciones.",
     nothing_recorded: "No se hizo nada en lo que se grabó.",
     irreversible: "Pulsa algo que no se puede deshacer:",
+    mark_hint: "Marca los clics que deben preguntar antes:",
+    show_steps: "Ver sus pasos",
     run: "Reproducir",
     cancel: "Cancelar",
     repair: "Reparar con IA",
@@ -115,7 +123,7 @@ const ES: Texts = Texts {
     updating: "Actualizando...",
     update_failed: "No se pudo actualizar:",
     spanish: true,
-    no_tool: "Falta agent-record: ejecuta npx agent-record-adapter",
+    no_tool: "Falta agent-record: ejecuta npx desktop-recorder-mcp",
     saving: "Guardando...",
 };
 

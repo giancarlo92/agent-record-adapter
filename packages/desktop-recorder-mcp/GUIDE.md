@@ -26,15 +26,15 @@ Agent Record Adapter is not a fork. The official vercel-labs agent-desktop and a
 
 | Part | What it is | Where |
 |---|---|---|
-| `agent-record` | The CLI agents and scripts run: every agent-desktop command with the same syntax and answers, plus `record`, `secret`, `stroke`, `menu`, `click-at`, `navigate`, `press --window-id`, `type w-<id>` and `browser` (agent-browser) | `%USERPROFILE%\.agent-record-adapter\bingent-record.exe` once installed |
-| Engine | The official agent-desktop, built from its unmodified sources with our background adapter; `agent-record` runs agent-desktop's own commands through it | `%USERPROFILE%\.agent-record-adapter\bingent-desktop.exe` |
-| agent-browser | The official vercel-labs agent-browser npm package, unmodified, for web pages in a browser with DevTools (`agent-record browser ...`) | `%USERPROFILE%\.agent-record-adapter\browser` |
-| MCP server | `agent-record mcp`: every command as an MCP tool for an AI agent | Registered in each agent by the installer under the name `agent-record` |
-| Skills | The official `agent-desktop`, `agent-desktop-windows` and `agent-browser`, unmodified, and ours: `agent-record-background`, `desktop-recording`, `recording-to-script`, `script-repair` | Copied into Claude Code, Codex and Windsurf; served to every agent by `desktop_skills_get` |
-| Desktop Recorder | A small floating bar that records a task and plays it again, without AI | `%USERPROFILE%\.agent-record-adapter\bin\desktop-recorder.exe`, Start menu > Desktop Recorder |
-| `agent-record-adapter` | The npm package that installs all of the above | `packages/agent-record-adapter` in the repository |
+| `agent-record` | The CLI agents and scripts run: every agent-desktop command with the same syntax and answers, plus `record`, `secret`, `stroke`, `menu`, `click-at`, `navigate`, `press --window-id`, `type w-<id>` and `browser` (agent-browser) | `%USERPROFILE%\.desktop-recorder-mcp\bin\agent-record.exe` once installed |
+| Engine | The official agent-desktop, built from its unmodified sources with our background adapter; `agent-record` runs agent-desktop's own commands through it | `%USERPROFILE%\.desktop-recorder-mcp\bin\agent-desktop.exe` |
+| agent-browser | The official vercel-labs agent-browser, built from its unmodified sources and shipped inside this package, for web pages in a browser with DevTools (`agent-record browser ...`) | `%USERPROFILE%\.desktop-recorder-mcp\bin\agent-browser.exe` |
+| MCP server | `agent-record mcp`: every command as an MCP tool for an AI agent | Registered in each agent by the installer under the name `desktop-recorder` |
+| Skills | The official `agent-desktop`, `agent-desktop-windows` and `agent-browser`, unmodified, and ours: `agent-record-background`, `desktop-recording`, `recording-to-script`, `script-repair` | Copied into Claude Code, Codex and OpenCode; served to every agent by `desktop_skills_get` |
+| Desktop Recorder | A small floating bar that records a task and plays it again, without AI | `%USERPROFILE%\.desktop-recorder-mcp\bin\desktop-recorder.exe`, Start menu > Desktop Recorder |
+| `desktop-recorder-mcp` | The one package that carries and installs all of the above: nothing else is downloaded or installed | `packages/desktop-recorder-mcp` in the repository |
 
-Source code: `crates/` (the background adapter, the recorder, secrets and the `agent-record` front), `apps/recorder/` (the app), `skills/` (our skills), `packages/agent-record-adapter/` (installer), `vendor/` (the official projects, unmodified).
+Source code: `crates/` (the background adapter, the recorder, secrets and the `agent-record` front), `apps/recorder/` (the app), `skills/` (our skills), `packages/desktop-recorder-mcp/` (installer), `vendor/` (the official projects, unmodified).
 
 ---
 
@@ -45,17 +45,17 @@ Source code: `crates/` (the background adapter, the recorder, secrets and the `a
 From npm (once a version is published):
 
 ```powershell
-npx agent-record-adapter
+npx desktop-recorder-mcp
 ```
 
-From a package file built here (`packages/agent-record-adapter/agent-record-adapter-<version>.tgz`). npx takes a package file only as `./name`, from the file's own folder:
+From a package file built here (`packages/desktop-recorder-mcp/desktop-recorder-mcp-<version>.tgz`). npx takes a package file only as `./name`, from the file's own folder:
 
 ```powershell
-cd "C:\path\to\agent-record-adapter\packages\agent-record-adapter"
+cd "C:\path\to\agent-record-adapter\packages\desktop-recorder-mcp"
 ```
 
 ```powershell
-npx ./agent-record-adapter-0.1.0.tgz
+npx ./desktop-recorder-mcp-1.0.0.tgz
 ```
 
 It lists the agents found on the computer; tick the ones to set up and press Enter. Then:
@@ -70,34 +70,34 @@ Agents that are open while it installs keep the previous version until they rest
 
 What it writes:
 
-- `%USERPROFILE%\.agent-record-adapter\bin`: `agent-record.exe` (the front), `agent-desktop.exe` (the engine), `desktop-recorder.exe`, `version.txt`; `%USERPROFILE%\.agent-record-adapter\browser`: the official agent-browser npm package;
-- `%USERPROFILE%\.agent-record-adapter\state`: private state of the MCP server (refs, recordings). It stays private: do not share it;
-- each agent's configuration, with a backup next to it (`.bak-agent-record-adapter`);
+- `%USERPROFILE%\.desktop-recorder-mcp\bin`: `agent-record.exe` (the front), `agent-desktop.exe` (the engine), `agent-browser.exe`, `desktop-recorder.exe`, `version.txt`; `%USERPROFILE%\.desktop-recorder-mcp\secrets.json` (the names of saved passwords, never their values) and `recorder.json` (the app's settings), kept by every install and uninstall;
+- `%USERPROFILE%\.desktop-recorder-mcp\state`: private state of the MCP server (refs, recordings). It stays private: do not share it;
+- each agent's configuration, with a backup next to it (`.bak-desktop-recorder-mcp`);
 - a Start menu entry "Desktop Recorder".
 
 ### Other installer commands
 
 ```powershell
-npx agent-record-adapter status
+npx desktop-recorder-mcp status
 ```
 
 ```powershell
-npx agent-record-adapter --agents claude-code,codex
+npx desktop-recorder-mcp --agents claude-code,codex
 ```
 
 ```powershell
-npx agent-record-adapter --dry-run
+npx desktop-recorder-mcp --dry-run
 ```
 
 ```powershell
-npx agent-record-adapter uninstall
+npx desktop-recorder-mcp uninstall
 ```
 
 ```powershell
-npx agent-record-adapter app
+npx desktop-recorder-mcp app
 ```
 
-`npx agent-record-adapter@<version> update` installs that version again for the agents already set up, without asking (this is what the app's Update button runs). `--home <folder>` installs into another home folder, for tests only.
+`npx desktop-recorder-mcp@<version> update` installs that version again for the agents already set up, without asking (this is what the app's Update button runs). `--home <folder>` installs into another home folder, for tests only.
 
 ### Update
 
@@ -105,7 +105,7 @@ Desktop Recorder asks npm for the latest version at start and every six hours. S
 
 ### Publish (the maintainer)
 
-In `packages/agent-record-adapter`: build the programs first (`cargo build --release` at the repository root, and in `apps/recorder`), then `node scripts/prepare.js` (copies `agent-record.exe`, `agent-desktop.exe`, `desktop-recorder.exe`, our skills and the official ones into the package, and pins agent-browser to the submodule's version), then `npm run release` (publishes and waits until the version can be downloaded). npm asks for 2FA in the browser. Run `npx agent-record-adapter@<version>` from another folder, not from the package's own.
+In `packages/desktop-recorder-mcp`: build the programs first (`cargo build --release` at the repository root, and in `apps/recorder`), then `node scripts/prepare.js` (copies `agent-record.exe`, `agent-desktop.exe`, `desktop-recorder.exe`, our skills and the official ones into the package, and pins agent-browser to the submodule's version), then `npm run release` (publishes and waits until the version can be downloaded). npm asks for 2FA in the browser. Run `npx desktop-recorder-mcp@<version>` from another folder, not from the package's own.
 
 ---
 
@@ -128,7 +128,7 @@ First read the skills, through the MCP server:
 An agent with a shell can run the same program directly:
 
 ```powershell
-& "$env:USERPROFILE\.agent-record-adapter\bin\agent-record.exe" list-windows
+& "$env:USERPROFILE\.desktop-recorder-mcp\bin\agent-record.exe" list-windows
 ```
 
 `--help` on any command lists its options. Use the CLI instead of the MCP server when you need something the server cannot give per call:
@@ -138,7 +138,7 @@ An agent with a shell can run the same program directly:
 
 In Codex, the CLI runs through Codex's own shell, which may run in its sandbox; if a CLI call fails there with an access error while the same MCP tool works, approve running that command outside the sandbox, or use the MCP tools, which have the cursor too (section 6).
 
-Refs (`@s8f3k2p9:e1`) belong to the namespace of the snapshot that printed them: a ref from an MCP snapshot works in MCP calls; a ref from a snapshot inside a CLI session works in that session. Do not mix them. To share the MCP server's state from the CLI, set `AGENT_DESKTOP_HOME=%USERPROFILE%\.agent-record-adapter\state`.
+Refs (`@s8f3k2p9:e1`) belong to the namespace of the snapshot that printed them: a ref from an MCP snapshot works in MCP calls; a ref from a snapshot inside a CLI session works in that session. Do not mix them. To share the MCP server's state from the CLI, set `AGENT_DESKTOP_HOME=%USERPROFILE%\.desktop-recorder-mcp\state`.
 
 ### Command families
 
@@ -164,7 +164,7 @@ Refs (`@s8f3k2p9:e1`) belong to the namespace of the snapshot that printed them:
 
 ## 4. Operating an app: the observe-act loop
 
-**Web apps work in the person's own browser, as it is.** Use the Chrome or Edge window the person already has open, with their profile and their session: nothing needs to be started in a special way. In it, without coming forward and without the person's mouse or keyboard:
+**Web apps work in the person's own browser, as it is.** Use the Chrome, Edge or Brave window the person already has open (any Chromium browser), with their profile and their session: nothing needs to be started in a special way. In it, without coming forward and without the person's mouse or keyboard:
 
 - `click` on a button, link, icon or menu group is a real pointer click at that point of the page (as mouse messages to the browser window), so components that listen to the pointer answer (a menu group's header, a date picker's button). A group or list item with no name of its own is clicked at its header (its first visible text), so a second click closes it again. Checkboxes, radio buttons, fields and lists keep their accessibility actions first; a component library's radio or checkbox whose real input is hidden (PrimeNG's `p-radiobutton`) is then clicked at its drawn box;
 - a minimized browser window is restored behind the person's windows (never brought forward) before a pointer click, since a minimized page has nowhere to click;
@@ -278,7 +278,7 @@ The cursor appears in the centre of the main display and moves to each element o
 **From the CLI**, in a session of your own:
 
 ```powershell
-$ad = "$env:USERPROFILE\.agent-record-adapter\bin\agent-record.exe"
+$ad = "$env:USERPROFILE\.desktop-recorder-mcp\bin\agent-record.exe"
 $start = & $ad session start --name demo --cursor | ConvertFrom-Json
 $env:AGENT_DESKTOP_SESSION = $start.data.session_id
 & $ad cursor-overlay enable --label "Exporting the report to PDF"
@@ -370,7 +370,7 @@ Repeat until every segment passes; only then join them.
 
 ## 9. The Desktop Recorder app
 
-A small floating bar, like Windows voice typing. Open it from the Start menu (Desktop Recorder) or with `npx agent-record-adapter app`. Its language follows Windows (Spanish or English).
+A small floating bar, like Windows voice typing. Open it from the Start menu (Desktop Recorder) or with `npx desktop-recorder-mcp app`. Its language follows Windows (Spanish or English).
 
 ### The bar
 
@@ -403,7 +403,7 @@ Each recording is a folder named `Recording YYYY-MM-DD HH.MM.SS` inside the chos
 
 For each recording, the list shows its name, the number of steps and the result of the last play, with three buttons:
 
-- **Play**: runs `script.mjs` in the background, so the person can keep working. Before a step that cannot be undone it asks. The result shows on the row; a failed play colours the repair button.
+- **Play**: runs `script.mjs` in the background, so the person can keep working. Before a step marked to ask it asks: by default the last click on a button (the one that usually sends, saves or pays), whatever language its name is in. Click a recording's line to see its steps and tick or untick the clicks that ask (kept in `ask-before.json` next to the recording). The result shows on the row; a failed play colours the repair button.
 - **Repair with AI**: copies to the clipboard a ready prompt for any AI agent: use the `script-repair` skill, the recording's folder, the step that failed and the rules (background only, no invented data, keep `script.original.mjs`, test with `--stop-before`, ask before steps that cannot be undone, say what changed). The person pastes it into their agent.
 - **Folder**: opens the recording's folder.
 
@@ -448,7 +448,7 @@ Never ask the person to type a password into the conversation.
 - **No invented data.** Use the values the person gave or the demo's test data; when something is missing, ask.
 - **Actions that cannot be undone** (send, delete, publish, buy, pay): ask first, unless the person said otherwise for test data.
 - **No CAPTCHAs, no bot-detection workarounds,** and check a site's terms before automating it.
-- **Private state stays private:** `%USERPROFILE%\.agent-record-adapter\state`, browser profiles, recordings with personal data.
+- **Private state stays private:** `%USERPROFILE%\.desktop-recorder-mcp\state`, browser profiles, recordings with personal data.
 - **Report what happened:** what worked, what failed, what was repaired and what was not checked.
 
 ---
@@ -502,6 +502,6 @@ Never ask the person to type a password into the conversation.
 | A step returns `delivered_unverified` and `data.surfaces` lists a dialog | The app is waiting on a dialog | Snapshot the dialog and answer it |
 | `menu` fails with `details.items` | The item has another name | Use a name from `details.items`, or `menu --find` |
 | An agent says the installed agent-record is older than the script | The agent still runs the previous version (its MCP server started before the install) | Restart the agent or open a new conversation |
-| Desktop Recorder: "agent-record is missing" | Not installed in `%USERPROFILE%\.agent-record-adapter\bin` | `npx agent-record-adapter` |
+| Desktop Recorder: "agent-record is missing" | Not installed in `%USERPROFILE%\.desktop-recorder-mcp\bin` | `npx desktop-recorder-mcp` |
 | Desktop Recorder: a play failed | The app or page changed | Repair with AI (section 9), then Play again |
-| The update failed | npm or the network | The app shows the error; try again later, or `npx agent-record-adapter@<version> update` |
+| The update failed | npm or the network | The app shows the error; try again later, or `npx desktop-recorder-mcp@<version> update` |

@@ -9,6 +9,7 @@ pub(crate) mod chromium_input;
 pub(crate) mod disclosure;
 pub(crate) mod dropdown;
 pub(crate) mod focus_guard;
+pub(crate) mod key_names;
 pub(crate) mod list_item;
 pub(crate) mod menu_command;
 pub(crate) mod point_click;

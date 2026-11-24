@@ -22,7 +22,7 @@ There is no fork. Updating to a new upstream version is `scripts/update-upstream
 | The engine: upstream agent-desktop's own CLI and MCP server, compiled unmodified with our adapter | `crates/engine` |
 | `agent-record`: one CLI and one MCP server for all of it | `crates/cli` |
 | Desktop Recorder app (record, play, repair) | `apps/recorder` |
-| Installer for Claude Code, Codex, Gemini, Claude Desktop, Cursor, VS Code, Windsurf | `packages/agent-record-adapter` |
+| Installer for Claude Code, Codex, Gemini, Claude Desktop, Cursor, VS Code, OpenCode | `packages/desktop-recorder-mcp` |
 | Skills: background, recording, recording-to-script, script-repair | `skills/` |
 | Live checks | `tests/background` |
 
@@ -48,7 +48,7 @@ cargo build --release            # target\release\agent-record.exe and agent-des
 cargo test -p agent-record-core -p agent-record-windows -p agent-record -p agent-record-browser
 ```
 
-agent-browser is installed from npm by the installer, unmodified; for development it can be built from the submodule: `cargo build --release --manifest-path vendor/agent-browser/cli/Cargo.toml --target-dir target/agent-browser`, then set `AGENT_RECORD_BROWSER_BIN` to the exe.
+agent-browser is built from the unmodified submodule and shipped inside the installer package, next to `agent-record.exe`: `cargo build --release --manifest-path vendor/agent-browser/cli/Cargo.toml --target-dir target/agent-browser`. The package is `packages/desktop-recorder-mcp` (`npm run prepare-vendor` there copies the four programs in); it installs nothing from npm, and in every agent its MCP server is named `desktop-recorder`.
 
 ## License
 

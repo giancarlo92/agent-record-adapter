@@ -6,7 +6,7 @@
 //   npm run release
 //
 // npm accepts a publish at once but, for accounts with staged publishing, shows the new version only
-// some minutes later, and its download a few minutes after that. Until then `npx agent-record-adapter@<v>`
+// some minutes later, and its download a few minutes after that. Until then `npx desktop-recorder-mcp@<v>`
 // fails with ETARGET (no such version) or a 404. This waits for both, so the install command it
 // prints at the end works. A version already published and still waiting (E409) is waited for too.
 

@@ -86,7 +86,7 @@ fn list(args: &[String]) -> ExitCode {
             "aliases": skill.aliases,
             "summary": skill.summary,
             "references": skill.references.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
-            "source": "agent-record-adapter",
+            "source": "desktop-recorder-mcp",
         }));
     }
     crate::run::emit("skills", Ok(json!({ "skills": skills })))

@@ -39,7 +39,7 @@ pub fn app_home() -> PathBuf {
 }
 
 /// The folder Agent Record Adapter installs into and keeps its state in, under a home folder.
-pub const PRODUCT_DIR: &str = ".agent-record-adapter";
+pub const PRODUCT_DIR: &str = ".desktop-recorder-mcp";
 
 /// agent-record: next to this app, else where Agent Record Adapter installed it.
 pub fn agent_desktop() -> Option<PathBuf> {
@@ -75,7 +75,7 @@ fn command(program: &Path) -> Command {
 /// One agent-record command: its `data`, or the error's message.
 pub fn run(args: &[String]) -> Result<Value, String> {
     let program =
-        agent_desktop().ok_or("agent-record was not found: run npx agent-record-adapter")?;
+        agent_desktop().ok_or("agent-record was not found: run npx desktop-recorder-mcp")?;
     let output = command(&program)
         .args(args)
         // A recording started from here leaves the bar's own clicks out.

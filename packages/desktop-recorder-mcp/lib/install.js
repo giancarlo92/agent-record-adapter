@@ -1,10 +1,11 @@
 // Part of Agent Record Adapter (see NOTICE).
 'use strict';
 
-// Installing Agent Record Adapter: the programs in one folder of their own (agent-record, the front;
-// agent-desktop, the engine built from the unmodified upstream sources with our adapter; Desktop
-// Recorder), the official agent-browser npm package unmodified in a folder of its own, then for each
-// chosen agent the MCP server and, where the agent reads skills from a folder, the skills.
+// Installing desktop-recorder-mcp: every program comes inside this one package and goes into one
+// folder of its own (agent-record, the front; agent-desktop, the engine built from the unmodified
+// upstream sources with our adapter; agent-browser, built from its unmodified upstream sources;
+// Desktop Recorder). Nothing is downloaded or installed from another package. Then, for each chosen
+// agent, the MCP server and, where the agent reads skills from a folder, the skills.
 
 const fs = require('fs');
 const path = require('path');
@@ -13,21 +14,29 @@ const { execFileSync, execSync } = require('child_process');
 const config = require('./config');
 const { agents, onPath } = require('./agents');
 
-const SERVER = 'agent-record';
+// The MCP server's name in every agent: the same as the earlier releases of this package, so an
+// install replaces them in place.
+const SERVER = 'desktop-recorder';
+// Names an earlier build of this project used, removed from every agent on install and uninstall.
+const LEGACY_SERVERS = ['agent-record'];
 const PACKAGE = path.join(__dirname, '..');
 // The official skills (copied unmodified from the upstream projects) and ours, which complement them.
 const OFFICIAL_SKILLS = ['agent-desktop', 'agent-desktop-windows', 'agent-browser'];
 const OUR_SKILLS = ['agent-record-background', 'desktop-recording', 'recording-to-script', 'script-repair'];
-const MARKER = '.agent-record-adapter';
+// The install folder's name and the mark left in each skill folder we copy: the same as the earlier
+// releases, so their skills, saved passwords and recordings carry over.
+const MARKER = '.desktop-recorder-mcp';
+// What earlier builds left that this one no longer uses: agent-browser installed from npm.
+const LEGACY_FOLDERS = ['browser'];
 
-/** The built programs: the package's vendor folder, or AGENT_RECORD_ADAPTER_VENDOR (tests). */
+/** The built programs: the package's vendor folder, or DESKTOP_RECORDER_MCP_VENDOR (tests). */
 function vendorDir() {
-  return process.env.AGENT_RECORD_ADAPTER_VENDOR || path.join(PACKAGE, 'vendor');
+  return process.env.DESKTOP_RECORDER_MCP_VENDOR || path.join(PACKAGE, 'vendor');
 }
 
-/** The skills folder: the package's, or AGENT_RECORD_ADAPTER_SKILLS (tests and a repository checkout). */
+/** The skills folder: the package's, or DESKTOP_RECORDER_MCP_SKILLS (tests and a repository checkout). */
 function skillsDir() {
-  return process.env.AGENT_RECORD_ADAPTER_SKILLS || path.join(PACKAGE, 'skills');
+  return process.env.DESKTOP_RECORDER_MCP_SKILLS || path.join(PACKAGE, 'skills');
 }
 const SKILLS = [...OFFICIAL_SKILLS, ...OUR_SKILLS];
 
@@ -43,66 +52,39 @@ function layout(home) {
     engine: path.join(root, 'bin', 'agent-desktop.exe'),
     // The small recorder app (Record / Stop, its recordings, Play), next to agent-record.
     app: path.join(root, 'bin', 'desktop-recorder.exe'),
-    // The official agent-browser npm package, installed unmodified with npm.
-    browser: path.join(root, 'browser'),
+    // agent-browser, built from its unmodified sources, which the front runs for web pages.
+    browser: path.join(root, 'bin', 'agent-browser.exe'),
     // The tool's private state (refs, snapshots, recordings), apart from the upstream tool's ~/.agent-desktop.
     state: path.join(root, 'state'),
   };
 }
 
 function server(where) {
-  const env = { AGENT_DESKTOP_HOME: where.state };
-  const browser = agentBrowserPath(where);
-  if (browser) env.AGENT_BROWSER_BIN = browser;
-  return { command: where.exe, args: ['mcp'], env };
+  return { command: where.exe, args: ['mcp'], env: { AGENT_DESKTOP_HOME: where.state, AGENT_BROWSER_BIN: where.browser } };
 }
 
-/** The installed agent-browser: its native program when npm placed it, else npm's command script. */
-function agentBrowserPath(where) {
-  const modules = path.join(where.browser, 'node_modules');
-  const arch = process.arch === 'arm64' ? 'x64' : process.arch;
-  const candidates = [
-    process.platform === 'win32' ? path.join(modules, 'agent-browser', 'bin', `agent-browser-win32-${arch}.exe`) : null,
-    path.join(modules, '.bin', process.platform === 'win32' ? 'agent-browser.cmd' : 'agent-browser'),
-  ].filter(Boolean);
-  return candidates.find((file) => fs.existsSync(file)) || null;
-}
-
-/** The agent-browser version this package was built and tested with. */
-function agentBrowserVersion() {
-  return (require('../package.json').agentBrowser || {}).version || 'latest';
-}
-
-/** The npm command line that installs the official agent-browser, unmodified, into its own folder. */
-function browserInstallCommand(where) {
-  return commandLine(['npm', 'install', '--prefix', where.browser, '--no-fund', '--no-audit', '--no-save',
-    `agent-browser@${agentBrowserVersion()}`]);
-}
-
-function installBrowser(where, options, log) {
-  const line = browserInstallCommand(where);
-  if (!line) throw new Error(`it cannot be installed into ${where.browser} from the command shell`);
-  fs.mkdirSync(where.browser, { recursive: true });
-  execSync(line, { stdio: 'ignore', windowsHide: true, env: options.env, cwd: where.browser });
-  const found = agentBrowserPath(where);
-  if (!found) throw new Error('npm installed it but its program was not found');
-  log(`agent-browser ${agentBrowserVersion()}: ${found}`);
+/** The programs the package carries, by file name, and where each one goes. */
+function programs(where) {
+  return [
+    ['agent-record.exe', where.exe],
+    ['agent-desktop.exe', where.engine],
+    ['agent-browser.exe', where.browser],
+    ['desktop-recorder.exe', where.app],
+  ];
 }
 
 function installProgram(where, log) {
   const vendor = vendorDir();
-  const source = path.join(vendor, 'agent-record.exe');
-  const engine = path.join(vendor, 'agent-desktop.exe');
-  for (const file of [source, engine]) {
+  for (const [name] of programs(where)) {
+    const file = path.join(vendor, name);
     if (!fs.existsSync(file)) throw new Error(`The package has no program (${file}); run npm run prepare-vendor`);
   }
   fs.mkdirSync(where.bin, { recursive: true });
   fs.mkdirSync(where.state, { recursive: true });
   makePrivate(where.state);
   removeSetAside(where.bin);
-  const kept = [replace(source, where.exe), replace(engine, where.engine)].some(Boolean);
-  const app = path.join(vendor, 'desktop-recorder.exe');
-  if (fs.existsSync(app)) replace(app, where.app);
+  for (const folder of LEGACY_FOLDERS) fs.rmSync(path.join(where.root, folder), { recursive: true, force: true });
+  const kept = programs(where).map(([name, target]) => replace(path.join(vendor, name), target)).some(Boolean);
   // The recorder app reads it to know which version it is, and whether a newer one is out.
   fs.writeFileSync(path.join(where.bin, 'version.txt'), require('../package.json').version);
   log(`Program: ${where.exe}`);
@@ -182,7 +164,7 @@ function addShortcut(where, options) {
  * agent-desktop (the engine) keeps its state (snapshots, refs) only in a folder no one else can open, and refuses
  * one it finds open to others: it never widens or repairs one it did not make. Other tools may grant
  * themselves access to folders under the person's home (the Codex sandbox gives its own group
- * access to ~/.agent-record-adapter), and a folder made here would inherit that. So the state folder
+ * access to ~/.desktop-recorder-mcp), and a folder made here would inherit that. So the state folder
  * stops inheriting and is opened only to the person, SYSTEM and Administrators, the same three
  * agent-desktop sets on the folders it makes; what is already inside goes back to inheriting from it.
  */
@@ -249,17 +231,17 @@ function removeSkills(agent) {
 // On Windows those CLIs are npm's .cmd scripts, which only the command shell can run, so each call is
 // one command line built here, every part quoted (see commandLine). A value that cannot be passed that
 // way falls back to editing the configuration file, as for the other agents.
-function cliArgs(agent, spec) {
+function cliArgs(agent, spec, name = SERVER) {
   const env = Object.entries(spec.env).flatMap(([key, value]) => ['--env', `${key}=${value}`]);
   if (agent.id === 'claude-code') {
     return {
-      remove: ['claude', 'mcp', 'remove', SERVER, '--scope', 'user'],
-      add: ['claude', 'mcp', 'add', SERVER, '--scope', 'user', ...env, '--', spec.command, ...spec.args],
+      remove: ['claude', 'mcp', 'remove', name, '--scope', 'user'],
+      add: ['claude', 'mcp', 'add', name, '--scope', 'user', ...env, '--', spec.command, ...spec.args],
     };
   }
   return {
-    remove: ['codex', 'mcp', 'remove', SERVER],
-    add: ['codex', 'mcp', 'add', SERVER, ...env, '--', spec.command, ...spec.args],
+    remove: ['codex', 'mcp', 'remove', name],
+    add: ['codex', 'mcp', 'add', name, ...env, '--', spec.command, ...spec.args],
   };
 }
 
@@ -267,7 +249,28 @@ function usesCli(agent, options) {
   return options.useCli && agent.cli && ['claude-code', 'codex'].includes(agent.id) && onPath(agent.cli, options.env);
 }
 
+/** Removes one server by name, through the agent's CLI when it has one. Returns whether it was there. */
+function removeNamed(agent, name, options) {
+  if (!config.has(agent.mcp, name)) return false;
+  if (usesCli(agent, options)) {
+    const line = commandLine(cliArgs(agent, server(layout(options.home)), name).remove);
+    try {
+      if (line) {
+        run(line, options);
+        return true;
+      }
+    } catch (_) { /* fall back to the file */ }
+  }
+  return config.remove(agent.mcp, name);
+}
+
+/** Removes the names earlier builds used, so an agent never lists two of these servers. */
+function removeLegacy(agent, options) {
+  return LEGACY_SERVERS.filter((name) => removeNamed(agent, name, options));
+}
+
 function addServer(agent, where, options) {
+  removeLegacy(agent, options);
   const spec = server(where);
   if (usesCli(agent, options)) {
     const calls = cliArgs(agent, spec);
@@ -282,10 +285,8 @@ function addServer(agent, where, options) {
 }
 
 function removeServer(agent, options) {
-  if (usesCli(agent, options)) {
-    try { run(commandLine(cliArgs(agent, server(layout(options.home))).remove), options); return true; } catch (_) { return false; }
-  }
-  return config.remove(agent.mcp, SERVER);
+  const legacy = removeLegacy(agent, options);
+  return removeNamed(agent, SERVER, options) || legacy.length > 0;
 }
 
 /**
@@ -314,13 +315,6 @@ function install(chosen, options) {
   const log = options.log || console.log;
   if (!options.dryRun) {
     installProgram(where, log);
-    if (options.installBrowser) {
-      try {
-        installBrowser(where, options, log);
-      } catch (error) {
-        log(`agent-browser: not installed (${error.message}); web pages need it: npm install --prefix "${where.browser}" agent-browser`);
-      }
-    }
     try {
       const link = addShortcut(where, options);
       if (link) log(`Desktop Recorder: Start menu > Desktop Recorder (${where.app})`);
@@ -361,8 +355,9 @@ function uninstall(chosen, options) {
     }
   }
   if (options.removeProgram) {
-    fs.rmSync(layout(options.home).bin, { recursive: true, force: true });
-    fs.rmSync(layout(options.home).browser, { recursive: true, force: true });
+    const where = layout(options.home);
+    fs.rmSync(where.bin, { recursive: true, force: true });
+    for (const folder of LEGACY_FOLDERS) fs.rmSync(path.join(where.root, folder), { recursive: true, force: true });
     fs.rmSync(shortcutPath(options.env, options.home), { force: true });
     results.push('Program removed (recordings kept in ' + layout(options.home).state + ')');
   }
@@ -371,11 +366,10 @@ function uninstall(chosen, options) {
 
 function status(options) {
   const where = layout(options.home);
-  const browser = agentBrowserPath(where);
   const lines = [
     `Program: ${fs.existsSync(where.exe) ? `${where.exe} (${version(where.exe) || 'unknown version'})` : 'not installed'}`,
     `Engine: ${fs.existsSync(where.engine) ? `${where.engine} (agent-desktop ${version(where.engine) || 'unknown version'})` : 'not installed'}`,
-    `agent-browser: ${browser || 'not installed'}`,
+    `agent-browser: ${fs.existsSync(where.browser) ? where.browser : 'not installed'}`,
   ];
   for (const agent of agents(options.home, options.env)) {
     const found = agent.detect();
@@ -388,6 +382,6 @@ function status(options) {
 }
 
 module.exports = {
-  agentBrowserPath, browserInstallCommand, commandLine, install, installedAgents, uninstall, status, layout, server,
-  shortcutPath, MARKER, OFFICIAL_SKILLS, OUR_SKILLS, SERVER, SKILLS,
+  commandLine, install, installedAgents, uninstall, status, layout, server,
+  shortcutPath, LEGACY_SERVERS, MARKER, OFFICIAL_SKILLS, OUR_SKILLS, SERVER, SKILLS,
 };

@@ -236,9 +236,14 @@ mod imp {
     /// or the item's Name cell).
     fn explorer_name(element: &UIAElement) -> bool {
         let class = element.0.get_classname().unwrap_or_default();
+        // The Name cell by its property id: its name is the column's, in the
+        // language of Windows ("Name", "Nombre", "名前"...).
         if class != "UIRenameTextElement"
             && class != "UIItem"
-            && !element.0.get_name().is_ok_and(|n| n == "Name")
+            && !element
+                .0
+                .get_automation_id()
+                .is_ok_and(|id| id == "System.ItemNameDisplay")
         {
             return false;
         }

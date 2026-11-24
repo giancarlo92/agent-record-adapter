@@ -27,7 +27,7 @@ agent-record is one program made of the official tools, unmodified, plus a layer
 - **agent-browser** commands run as `agent-record browser <command> ...` (the official agent-browser skill describes them);
 - the commands below are agent-record's own.
 
-Through MCP every command is a `desktop_*` tool of the `agent-record` server (`desktop_click`, `desktop_menu`, `desktop_record_start`, ...).
+Through MCP every command is a `desktop_*` tool of the `desktop-recorder` server (`desktop_click`, `desktop_menu`, `desktop_record_start`, ...).
 
 ## Background first, the original as backup
 

@@ -6,7 +6,7 @@ requirements:
 description: >
   ALWAYS use this skill before writing any script, bot or automation that repeats a task done in
   a desktop app or a web page: a task you just did in this conversation with the desktop tools
-  (agent-record, agent-record, agent-browser), a task the person recorded (agent-record record), or one
+  (agent-record, its desktop-recorder MCP server, agent-browser), a task the person recorded (agent-record record), or one
   they describe. The script repeats the same steps in the same app, without AI and in the
   background, with the values that change as parameters and passwords filled by name.
   JavaScript by default; any language the person asks for (Python, Go, PowerShell...).
@@ -86,7 +86,7 @@ A password (`secure: true`) is never written in the script, never a parameter an
 These were tested on real forms, a password prompt and a desktop app, with a person typing and clicking meanwhile.
 
 1. **Run agent-record and read its JSON.** Every command prints one envelope: `{"ok": true, "data": ...}` or `{"ok": false, "error": {"code", "message", "details", "disposition"}}`. A step fails when `ok` is false. Call the program directly with an argument list, never through a shell string (values with spaces, quotes or `&` stay intact).
-2. **Use the installed program.** `$AGENT_RECORD_BIN` if set, else `~/.agent-record-adapter/bin/agent-record(.exe)`, else `agent-record` on PATH. Check that `agent-record navigate --help` works (only agent-record has it): the official agent-desktop would move the mouse and bring windows forward. Scripts run it with `AGENT_DESKTOP_BACKGROUND=1`.
+2. **Use the installed program.** `$AGENT_RECORD_BIN` if set, else `~/.desktop-recorder-mcp/bin/agent-record(.exe)`, else `agent-record` on PATH. Check that `agent-record navigate --help` works (only agent-record has it): the official agent-desktop would move the mouse and bring windows forward. Scripts run it with `AGENT_DESKTOP_BACKGROUND=1`.
 3. **Open, never attach to, what the person is using.** A desktop app: `launch <program>` (it never takes the focus), then wait for its window by title. A web page: `launch <browser> --no-attach --cdp --arg=--user-data-dir=<a folder of the script's own> --arg=--no-first-run --arg=<url>`. The DevTools endpoint lets clicks, values, list choices and checkboxes on the page happen without the browser ever coming forward, and the separate profile leaves the person's own browser alone. Find its window by the `pid` that `launch` returned.
 4. **Find each element right before acting on it**, inside the task's window (`find --window-id <id> --first ...`). Refs belong to one snapshot and go stale. Prefer, in this order: `--native-id`, then `--role` with `--name` (`--exact` for short names such as "AI"), then `--name` with the `help_text` or `label`, then an ancestor when `match_count` was above 1. Retry `find` for a while (15 s) instead of sleeping a fixed time: pages and apps answer at different speeds.
 5. **A text that is only read has no ref.** A message, a total or a status is read from the `find` match itself (`match.value`, else `match.name`), not with `get`.
@@ -252,7 +252,7 @@ Write the same few helpers the library has, in that language, and keep the rules
 import json, os, subprocess, sys, time
 from pathlib import Path
 
-AD = os.environ.get("AGENT_RECORD_BIN") or str(Path.home() / ".agent-record-adapter" / "bin" / "agent-record.exe")
+AD = os.environ.get("AGENT_RECORD_BIN") or str(Path.home() / ".desktop-recorder-mcp" / "bin" / "agent-record.exe")
 
 def run(*args):
     answer = json.loads(subprocess.run([AD, *map(str, args)], capture_output=True, text=True).stdout)

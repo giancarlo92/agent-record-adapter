@@ -112,6 +112,13 @@ pub trait RecordOps {
         Err(AdapterError::not_supported("record_input"))
     }
 
+    /// The address of the page a browser window shows, scheme included, read
+    /// in a way that does not depend on the browser's language. `None` when
+    /// the window shows no page or the platform cannot read it.
+    fn browser_address(&self, _window_id: &str) -> Option<String> {
+        None
+    }
+
     /// Asks the person at the screen for a secret in a window of the
     /// platform's own, its characters hidden. `Ok(None)` when they cancel.
     fn ask_secret(&self, _title: &str, _message: &str) -> Result<Option<String>, AdapterError> {

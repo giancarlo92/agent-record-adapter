@@ -10,13 +10,19 @@ agent-record.exe (crates/cli)                 one CLI + one MCP server
  │   record, secret, stroke, menu, click-at,
  │   navigate, type w-<id>, list-displays,
  │   skills (ours + upstream's)
- ├─ browser ... ─────────────────────────────► crates/browser ─► agent-browser (unmodified, npm)
+ ├─ browser ... ─────────────────────────────► crates/browser ─► agent-browser (unmodified sources, our build)
  │                                                     └─ DevTools proxy ─► dedicated Chrome (behind)
  ├─ every other command ─────────────────────► agent-desktop.exe = the engine (crates/engine)
  │                                               upstream's own src/main.rs, unmodified,
  │                                               built with our WindowsAdapter
  └─ mcp ── merges ── engine's `mcp` (desktop_*) + agent-browser's `mcp` (agent_browser_*) + our tools
 ```
+
+### One package (`packages/desktop-recorder-mcp`)
+
+Everything ships in one npm package, `desktop-recorder-mcp` (the name of this project's earlier releases; `agent-record` is taken on npm). It carries four programs, all built here: `agent-record.exe` (the front), `agent-desktop.exe` (the engine), `agent-browser.exe` (built from the unmodified agent-browser submodule with `--target-dir target/agent-browser`) and `desktop-recorder.exe`. The installer copies them into `%USERPROFILE%\.desktop-recorder-mcp\bin` and installs nothing from any other package. In every agent the MCP server is named `desktop-recorder`, so an install replaces an earlier one in place, keeps its saved passwords (`secrets.json`), the app's settings and the recordings, and removes the name an earlier build used (`agent-record`) and its npm folder (`browser`). The agents: Claude Code, Codex, Gemini CLI, Claude Desktop, Cursor, VS Code and OpenCode (`~/.config/opencode/opencode.json`, servers under `mcp.servers`, skills in `~/.config/opencode/skills`).
+
+The agent-browser built here embeds a placeholder in place of its optional web dashboard (`agent-browser dashboard`): building the dashboard needs pnpm inside the submodule. Nothing in this project uses the dashboard.
 
 ### The engine (`crates/engine`)
 
@@ -56,7 +62,7 @@ Platform-neutral: the background switch, the recording format, secrets (store, p
 
 ### Web pages (`crates/browser`)
 
-Any page with DevTools is agent-browser's. `agent-record browser <args>` starts, when needed, a dedicated Chrome (own profile under `%LOCALAPPDATA%\AgentRecordAdapter\chrome-profile`, anti-occlusion switches, no startup window, its window sent behind) and a DevTools proxy, then runs agent-browser with `--cdp <proxy>`. The proxy swallows `Page.bringToFront` and `Target.activateTarget`, keeps focus emulation on so typing lands in a page that is behind, and, while a recording runs, writes agent actions (`driver: "browser"`, `by: "agent"`, secrets never written) to the recording's agent inbox. `--daily [port]` targets the person's own Chrome when it has DevTools; without DevTools, its pages are desktop windows (`navigate`, `click`, ... through window messages, `actions/chromium_input.rs`).
+Any page with DevTools is agent-browser's. The MCP server starts no browser: agent-browser's server lists its tools without one, and the dedicated Chrome and the proxy start at the first web tool call that needs a page (`LazyBrowser`), so an agent that never opens a page never shows a Chrome, and a Chrome the person closes comes back only when a web tool is used again. The proxy keeps one port from start to start (saved in `proxies/<chrome port>.json`), because agent-browser's daemon keeps the port it was first given. The dedicated browser is the first of Chrome, Edge and Brave installed (`AGENT_RECORD_BROWSER=chrome|edge|brave` picks one, `AGENT_RECORD_CHROME` takes any Chromium program), each with a profile of its own (`chrome-profile`, `edge-profile`, `brave-profile`); Edge is started with `--disable-features=msImplicitSignin` in the same switch as the occlusion feature, since a new Edge profile otherwise signs into the person's Windows Microsoft account and syncs their extensions. The person's own browser without DevTools is any Chromium window (`Chrome_WidgetWin_1`, address bar `OmniboxViewViews`, `BraveOmniboxViewViews` in Brave), so the desktop route is the same in Chrome, Edge and Brave; `--daily` without a port finds DevTools in Chrome's, Edge's or Brave's `DevToolsActivePort`. `agent-record browser <args>` starts, when needed, a dedicated Chrome (own profile under `%LOCALAPPDATA%\DesktopRecorder\chrome-profile`, anti-occlusion switches, no startup window, its window sent behind) and a DevTools proxy, then runs agent-browser with `--cdp <proxy>`. The proxy swallows `Page.bringToFront` and `Target.activateTarget`, keeps focus emulation on so typing lands in a page that is behind, and, while a recording runs, writes agent actions (`driver: "browser"`, `by: "agent"`, secrets never written) to the recording's agent inbox. `--daily [port]` targets the person's own Chrome when it has DevTools; without DevTools, its pages are desktop windows (`navigate`, `click`, ... through window messages, `actions/chromium_input.rs`).
 
 The old fork's own DevTools route (`cdp_page`, `devtools`, `cdp_socket`, `cdp_endpoint`, about 1,160 lines) was not brought over: agent-browser replaces it.
 
@@ -98,6 +104,17 @@ The old fork also changed upstream's core code. Each is reproduced outside it:
 - `click-at` on a classic Win32 push button in a window behind does not press it (a native button needs the mouse capture, which a background window cannot take; the old fork had the same limit): `click` on its ref presses it with `BN_CLICKED`. `click-at` is for drawn content (a grid, a canvas), where it works.
 - Two upstream issues seen while testing, not ours: `find` on GridCraft's tree can answer "RefEntry contains an invalid role"; on this machine upstream refuses the default state folder `~/.agent-desktop` ("private file DACL grants an untrusted principal"), so the checks use their own `AGENT_DESKTOP_HOME`.
 
+## Any language
+
+Nothing compares the words of an app's or a browser's interface, so every route works in any language of Windows, the app or the browser:
+
+- A browser page's address: the page's own document, else the address bar found by its class (`OmniboxViewViews`, Brave's `BraveOmniboxViewViews`), never by its name ("Address and search bar", "Barra de direcciones y de búsqueda", "アドレス検索バー"). `secret fill` reads it through `RecordOps::browser_address`.
+- A file's name in File Explorer: the cell's property id `System.ItemNameDisplay`, not the column's name.
+- A shortcut a menu or a button shows ("Strg+S", "Mayús+Ctrl+S", "Save (Ctrl+S)"): each key known by the names Windows gives it in every keyboard layout installed (`GetKeyNameTextW`, `actions/key_names.rs`) and the English ones. A button is found by the keys its accelerator or its name shows, never by the words of its name.
+- Which recorded click asks before it runs: the last click on a button by default, by its place and role, and whatever the person marks in the app (`ask-before.json`).
+
+Limit: an app that exposes a button only by its name (WordCraft's Bold, Italic and Underline: no id, no accelerator, no keys in the name) has no language-free route from Ctrl+B to that button; the keys are pressed instead, which WordCraft takes only while its window is active. An agent can click the button by its ref in any language.
+
 ## Recording details
 
 - A paste into a field is followed like typing: the text it left is recorded (a `type` event) at the next flush, so a script writes that text instead of pasting whatever the clipboard holds then. Keys that only move the caret or select in a field (Ctrl+End, Shift+Home) are left out of the script: the value that follows holds their effect.
@@ -106,6 +123,6 @@ The old fork also changed upstream's core code. Each is reproduced outside it:
 
 ## Results (24 Nov 2026)
 
-- Unit tests: core 40, Windows layer 43 (and 1 ignored), front 14, browser 30, recorder app 14, installer 17: all pass. Clippy and rustfmt clean on our crates and the app.
+- Unit tests: core 40, Windows layer 43 (and 1 ignored), front 14, browser 35, recorder app 14, installer 19: all pass. Clippy and rustfmt clean on our crates and the app.
 - Upstream's CLI unit tests in the engine: 224 pass with background on and off (3 path-dependent contract tests and the shell-surface tests that press real Win+A skipped).
 - Live, with the person's foreground unchanged throughout: see tests/background/README.md.

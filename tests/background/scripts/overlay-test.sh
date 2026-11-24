@@ -4,7 +4,7 @@
 # SGH-like page, gone after session end. Usage: overlay-test.sh <agent-record.exe>
 set -u
 AD="$1"; S="$(dirname "$0")"
-export AGENT_DESKTOP_HOME="$LOCALAPPDATA/AgentRecordAdapter/tmp/js-state" TEMP="$LOCALAPPDATA/AgentRecordAdapter/tmp" TMP="$LOCALAPPDATA/AgentRecordAdapter/tmp"
+export AGENT_DESKTOP_HOME="$LOCALAPPDATA/DesktopRecorder/tmp/js-state" TEMP="$LOCALAPPDATA/DesktopRecorder/tmp" TMP="$LOCALAPPDATA/DesktopRecorder/tmp"
 D="$USERPROFILE/AprendeReplica-e2e/enter-test"; WD=$(cygpath -w "$D"); F="$D/ov-snap.json"
 where() { powershell -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$S/overlay-where.ps1")"; }
 "$AD" launch "C:\Program Files\Google\Chrome\Application\chrome.exe" --no-attach "--arg=--user-data-dir=$WD\profile-ov" --arg=--no-first-run "--arg=file:///$(cygpath -m "$D/sgh-like.html")" --timeout 30000 >/dev/null

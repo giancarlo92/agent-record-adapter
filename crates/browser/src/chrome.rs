@@ -15,32 +15,54 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 /// Chromium switches that keep a page working while other windows cover its
-/// window (the same the desktop layer gives every Chromium it launches).
+/// window (the same the desktop layer gives every Chromium it launches), with
+/// `CalculateNativeWinOcclusion` in [`disabled_features`].
 pub const ANTI_OCCLUSION_FLAGS: &[&str] = &[
-    "--disable-features=CalculateNativeWinOcclusion",
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
 ];
 
+/// The one `--disable-features` switch of the dedicated browser (Chromium
+/// reads only the last one, so every feature goes in it): occlusion off, and
+/// for Edge its implicit sign-in, which would sign a new profile into the
+/// person's Windows Microsoft account and sync their extensions into a browser
+/// that agents drive.
+pub fn disabled_features(browser: &Path) -> String {
+    let mut features = vec!["CalculateNativeWinOcclusion"];
+    if profile_name(browser) == "edge-profile" {
+        features.push("msImplicitSignin");
+    }
+    format!("--disable-features={}", features.join(","))
+}
+
 /// Default DevTools port of the dedicated Chrome (`AGENT_RECORD_CHROME_PORT`).
 pub const DEFAULT_CHROME_PORT: u16 = 9333;
 
-/// The folder of our own state: `%LOCALAPPDATA%\AgentRecordAdapter`
+/// The folder of our own state: `%LOCALAPPDATA%\DesktopRecorder`
 /// (`AGENT_RECORD_STATE_DIR` overrides it).
 pub fn state_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("AGENT_RECORD_STATE_DIR") {
         return PathBuf::from(dir);
     }
-    std::env::var_os("LOCALAPPDATA")
+    let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
-        .unwrap_or_else(std::env::temp_dir)
-        .join("AgentRecordAdapter")
+        .unwrap_or_else(std::env::temp_dir);
+    state_dir_in(&base)
 }
 
-/// The dedicated Chrome's profile folder.
-pub fn profile_dir() -> PathBuf {
-    state_dir().join("chrome-profile")
+/// `DesktopRecorder` under `base`. The folder an earlier build used
+/// (`AgentRecordAdapter`) is renamed to it the first time, so the dedicated
+/// Chrome keeps its profile; while that browser still runs the rename fails and
+/// the earlier folder stays in use.
+pub fn state_dir_in(base: &Path) -> PathBuf {
+    let current = base.join("DesktopRecorder");
+    let earlier = base.join("AgentRecordAdapter");
+    if current.exists() || !earlier.is_dir() || std::fs::rename(&earlier, &current).is_ok() {
+        current
+    } else {
+        earlier
+    }
 }
 
 /// The dedicated Chrome's DevTools port.
@@ -124,30 +146,94 @@ pub fn version(port: u16) -> Option<Value> {
     serde_json::from_str(&body).ok()
 }
 
-/// The Chrome (or another Chromium browser) to start: `AGENT_RECORD_CHROME`,
-/// else Chrome, else Edge, at their usual places.
+/// The Chromium browsers found by themselves, in the order they are tried:
+/// a short name, the program under Program Files (or the person's
+/// `%LOCALAPPDATA%` for a per-user install) and its own `User Data` folder.
+pub const KNOWN_BROWSERS: &[(&str, &str, &str)] = &[
+    (
+        "chrome",
+        r"Google\Chrome\Application\chrome.exe",
+        r"Google\Chrome\User Data",
+    ),
+    (
+        "edge",
+        r"Microsoft\Edge\Application\msedge.exe",
+        r"Microsoft\Edge\User Data",
+    ),
+    (
+        "brave",
+        r"BraveSoftware\Brave-Browser\Application\brave.exe",
+        r"BraveSoftware\Brave-Browser\User Data",
+    ),
+];
+
+/// The Chromium browser to start as the dedicated one: `AGENT_RECORD_CHROME`
+/// (any Chromium program), else the one `AGENT_RECORD_BROWSER` names
+/// (`chrome`, `edge` or `brave`), else Chrome, Edge or Brave, the first one
+/// installed.
 pub fn find_chrome() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("AGENT_RECORD_CHROME") {
         return Some(PathBuf::from(path));
     }
-    let mut candidates = Vec::new();
-    for var in ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"] {
-        if let Some(base) = std::env::var_os(var) {
-            let base = PathBuf::from(base);
-            candidates.push(base.join(r"Google\Chrome\Application\chrome.exe"));
-            candidates.push(base.join(r"Microsoft\Edge\Application\msedge.exe"));
-        }
-    }
-    candidates.into_iter().find(|path| path.is_file())
+    let wanted = std::env::var("AGENT_RECORD_BROWSER")
+        .ok()
+        .map(|name| name.trim().to_ascii_lowercase())
+        .filter(|name| !name.is_empty());
+    let bases: Vec<PathBuf> = ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"]
+        .iter()
+        .filter_map(|var| std::env::var_os(var).map(PathBuf::from))
+        .collect();
+    browser_candidates(&bases, wanted.as_deref())
+        .into_iter()
+        .find(|path| path.is_file())
+}
+
+/// Where each known browser (only `wanted`, when named) can be installed.
+pub fn browser_candidates(bases: &[PathBuf], wanted: Option<&str>) -> Vec<PathBuf> {
+    KNOWN_BROWSERS
+        .iter()
+        .filter(|(name, _, _)| wanted.is_none_or(|wanted| wanted == *name))
+        .flat_map(|(_, program, _)| bases.iter().map(move |base| base.join(program)))
+        .collect()
+}
+
+/// The dedicated profile of a browser program: one per browser, since
+/// Chrome, Edge and Brave cannot share a profile folder. Chrome's keeps the
+/// name it always had (`chrome-profile`).
+pub fn profile_for(browser: &Path) -> PathBuf {
+    state_dir().join(profile_name(browser))
+}
+
+fn profile_name(browser: &Path) -> String {
+    let stem = browser
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("chrome")
+        .to_ascii_lowercase();
+    let name = if stem == "msedge" {
+        "edge"
+    } else {
+        stem.as_str()
+    };
+    format!("{name}-profile")
 }
 
 /// The command line of the dedicated Chrome.
 pub fn launch_args(port: u16, profile: &Path, headless: bool) -> Vec<String> {
+    launch_args_for(Path::new("chrome.exe"), port, profile, headless)
+}
+
+/// The command line of the dedicated browser `browser` (Chrome, Edge, Brave).
+pub fn launch_args_for(browser: &Path, port: u16, profile: &Path, headless: bool) -> Vec<String> {
     let mut args = vec![
         format!("--remote-debugging-port={port}"),
         format!("--user-data-dir={}", profile.display()),
         "--no-first-run".into(),
         "--no-default-browser-check".into(),
+        // A browser ended by a shutdown would otherwise greet the next agent
+        // with a "restore pages" prompt over the page.
+        "--hide-crash-restore-bubble".into(),
+        disabled_features(browser),
     ];
     args.extend(ANTI_OCCLUSION_FLAGS.iter().map(|flag| (*flag).to_owned()));
     if headless {
@@ -173,16 +259,26 @@ pub fn ensure_dedicated() -> Result<u16, String> {
         ensure_window(port);
         return Ok(port);
     }
+    // The dedicated Chrome may already run on another port (started with
+    // AGENT_RECORD_CHROME_PORT): a second start with the same profile would only
+    // hand over to it and never answer, so it is used as it is.
+    if let Some(running) = saved_port().filter(|saved| *saved != port) {
+        if version(running).is_some() {
+            ensure_window(running);
+            return Ok(running);
+        }
+    }
     let chrome = find_chrome().ok_or_else(|| {
-        "No Chrome or Edge was found; set AGENT_RECORD_CHROME to a Chromium browser".to_owned()
+        "No Chrome, Edge or Brave was found; set AGENT_RECORD_CHROME to a Chromium browser"
+            .to_owned()
     })?;
-    let profile = profile_dir();
+    let profile = profile_for(&chrome);
     std::fs::create_dir_all(&profile)
         .map_err(|e| format!("cannot create {}: {e}", profile.display()))?;
     let headless = headless_requested();
     let mut command = Command::new(&chrome);
     command
-        .args(launch_args(port, &profile, headless))
+        .args(launch_args_for(&chrome, port, &profile, headless))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -229,10 +325,18 @@ fn ensure_window(port: u16) {
     }
 }
 
-fn dedicated_pid() -> Option<u32> {
+fn saved_state() -> Option<Value> {
     let raw = std::fs::read(state_dir().join("chrome.json")).ok()?;
-    let state: Value = serde_json::from_slice(&raw).ok()?;
-    u32::try_from(state.get("pid")?.as_u64()?).ok()
+    serde_json::from_slice(&raw).ok()
+}
+
+fn dedicated_pid() -> Option<u32> {
+    u32::try_from(saved_state()?.get("pid")?.as_u64()?).ok()
+}
+
+/// The DevTools port the dedicated Chrome was last started with.
+fn saved_port() -> Option<u16> {
+    u16::try_from(saved_state()?.get("port")?.as_u64()?).ok()
 }
 
 /// Opens a window with a blank page behind the person's windows, through the
@@ -320,11 +424,11 @@ pub fn daily_endpoint(port: Option<u16>) -> Result<DailyEndpoint, String> {
 }
 
 /// Why the daily Chrome cannot be driven through agent-browser.
-pub const NO_DEVTOOLS_MESSAGE: &str = "Your daily Chrome has no DevTools port open, so agent-browser cannot drive it. \
+pub const NO_DEVTOOLS_MESSAGE: &str = "Your daily browser (Chrome, Edge or Brave) has no DevTools port open, so agent-browser cannot drive it. \
 The desktop commands drive it instead, in the background, through window messages (chromium_input): \
 use agent-record snapshot/click/type/navigate on its window. \
-To use agent-browser on it, turn on chrome://inspect/#remote-debugging in that Chrome (Chrome 144+) and approve the prompt, \
-or start it with --remote-debugging-port and a profile of its own.";
+To use agent-browser on it, turn on remote debugging in that browser (chrome://inspect/#remote-debugging in Chrome 144+; \
+edge:// or brave:// in the others) and approve the prompt, or start it with --remote-debugging-port and a profile of its own.";
 
 /// The daily Chrome's DevTools endpoint.
 #[derive(Debug, Clone, PartialEq)]
@@ -337,8 +441,9 @@ pub struct DailyEndpoint {
 
 fn devtools_active_port() -> Option<(u16, String)> {
     let base = PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
-    [r"Google\Chrome\User Data", r"Microsoft\Edge\User Data"]
+    KNOWN_BROWSERS
         .iter()
+        .map(|(_, _, user_data)| user_data)
         .find_map(|dir| {
             parse_devtools_active_port(
                 &std::fs::read_to_string(base.join(dir).join("DevToolsActivePort")).ok()?,
@@ -392,6 +497,64 @@ mod tests {
         );
         assert_eq!(parse_devtools_active_port("x\n/devtools/browser/a"), None);
         assert_eq!(parse_devtools_active_port("9555\n"), None);
+    }
+
+    #[test]
+    fn chrome_then_edge_then_brave_or_only_the_named_one() {
+        let bases = [PathBuf::from("PF"), PathBuf::from("LA")];
+        let all = browser_candidates(&bases, None);
+        assert_eq!(all.len(), 6);
+        assert!(all[0].ends_with(r"Google\Chrome\Application\chrome.exe"));
+        assert!(all[2].ends_with(r"Microsoft\Edge\Application\msedge.exe"));
+        assert!(all[4].ends_with(r"BraveSoftware\Brave-Browser\Application\brave.exe"));
+        assert!(all[5].starts_with("LA"), "a per-user install is found too");
+        let brave = browser_candidates(&bases, Some("brave"));
+        assert_eq!(brave.len(), 2);
+        assert!(brave.iter().all(|path| path.ends_with("brave.exe")));
+        assert!(browser_candidates(&bases, Some("firefox")).is_empty());
+    }
+
+    #[test]
+    fn edge_is_kept_out_of_the_persons_account_in_one_disable_features_switch() {
+        let edge = launch_args_for(Path::new(r"C:\x\msedge.exe"), 9333, Path::new("p"), false);
+        let features: Vec<&String> = edge
+            .iter()
+            .filter(|arg| arg.starts_with("--disable-features="))
+            .collect();
+        assert_eq!(
+            features,
+            ["--disable-features=CalculateNativeWinOcclusion,msImplicitSignin"]
+        );
+        let chrome = launch_args_for(Path::new(r"C:\x\chrome.exe"), 9333, Path::new("p"), false);
+        assert!(chrome.contains(&"--disable-features=CalculateNativeWinOcclusion".to_owned()));
+        let brave = launch_args_for(Path::new(r"C:\x\brave.exe"), 9333, Path::new("p"), false);
+        assert!(!brave.iter().any(|arg| arg.contains("msImplicitSignin")));
+    }
+
+    #[test]
+    fn each_browser_has_a_dedicated_profile_of_its_own() {
+        assert_eq!(
+            profile_name(Path::new(r"C:\x\chrome.exe")),
+            "chrome-profile"
+        );
+        assert_eq!(profile_name(Path::new(r"C:\x\msedge.exe")), "edge-profile");
+        assert_eq!(profile_name(Path::new(r"C:\x\Brave.exe")), "brave-profile");
+    }
+
+    #[test]
+    fn the_state_folder_takes_over_the_one_an_earlier_build_used() {
+        let base = std::env::temp_dir().join(format!("dr-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("AgentRecordAdapter").join("chrome-profile")).unwrap();
+        let dir = state_dir_in(&base);
+        assert_eq!(dir, base.join("DesktopRecorder"));
+        assert!(
+            dir.join("chrome-profile").is_dir(),
+            "the profile moves with it"
+        );
+        assert!(!base.join("AgentRecordAdapter").exists());
+        assert_eq!(state_dir_in(&base), base.join("DesktopRecorder"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -18,7 +18,7 @@
 //!   taking that back after the key, lets the key reach the page's focused
 //!   element. Windows' own foreground and keyboard focus never move: the
 //!   person keeps typing where they were.
-//! - **Address.** The address bar (`OmniboxViewViews`, whatever the browser's
+//! - **Address.** The address bar (`OmniboxViewViews`, `BraveOmniboxViewViews` in Brave, whatever the browser's
 //!   language) takes the address as its value, and Enter opens it in the same
 //!   tab, with the tab's cookies and storage.
 
@@ -47,7 +47,8 @@ const CLICK_LABEL: &str = "PostMessage.PointerClick";
 const MK_LBUTTON: u32 = 0x0001;
 pub(crate) const CHROMIUM_FRAMEWORK: &str = "Chrome";
 const CHROMIUM_WINDOW_CLASS: &str = "Chrome_WidgetWin_1";
-const OMNIBOX_CLASS: &str = "OmniboxViewViews";
+/// The address bar's class: Chromium's (Chrome, Edge), and Brave's own.
+const OMNIBOX_CLASSES: &[&str] = &["OmniboxViewViews", "BraveOmniboxViewViews"];
 /// UIA_TextControlTypeId and UIA_DocumentControlTypeId.
 const TEXT_CONTROL_TYPE: i32 = 50020;
 const DOCUMENT_CONTROL_TYPE: i32 = 50030;
@@ -453,14 +454,19 @@ fn press_at(top: HWND, point: POINT) -> bool {
         }
 }
 
-fn omnibox(top: HWND, client: &UIAutomation) -> Option<UIElement> {
+/// The address bar of a Chromium window, found by its class: its name is in
+/// the browser's language ("Address and search bar", "Barra de direcciones y
+/// de búsqueda"...), its class is not.
+pub(crate) fn omnibox(top: HWND, client: &UIAutomation) -> Option<UIElement> {
     let root = client
         .element_from_handle(Handle::from(top as isize))
         .ok()?;
-    let condition = client
-        .create_property_condition(UIProperty::ClassName, Variant::from(OMNIBOX_CLASS), None)
-        .ok()?;
-    root.find_first(TreeScope::Descendants, &condition).ok()
+    OMNIBOX_CLASSES.iter().find_map(|class| {
+        let condition = client
+            .create_property_condition(UIProperty::ClassName, Variant::from(*class), None)
+            .ok()?;
+        root.find_first(TreeScope::Descendants, &condition).ok()
+    })
 }
 
 /// The document of the tab a Chromium window shows: the one shown; else,

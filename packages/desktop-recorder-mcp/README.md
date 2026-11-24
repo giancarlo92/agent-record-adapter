@@ -1,14 +1,14 @@
-# agent-record-adapter
+# desktop-recorder-mcp
 
-The installer of **Agent Record Adapter**: the official vercel-labs agent-desktop and agent-browser, unmodified, plus a background-only layer, record, saved passwords and Desktop Recorder.
+**Agent Record** for your AI agents, in one package: the official vercel-labs agent-desktop and agent-browser, built from their unmodified sources and shipped inside it, plus a background-only layer, record, saved passwords and Desktop Recorder. Nothing else is downloaded or installed, and it replaces an earlier desktop-recorder-mcp install in place (saved passwords, settings and recordings are kept).
 
-One command to give your AI agents a desktop they can see, use and **record**: Claude Code, Codex, Gemini CLI, Cursor, VS Code, Windsurf and Claude Desktop.
+One command to give your AI agents a desktop they can see, use and **record**: Claude Code, Codex, Gemini CLI, Cursor, VS Code, OpenCode and Claude Desktop.
 
 ```bash
-npx agent-record-adapter
+npx desktop-recorder-mcp
 ```
 
-It lists the agents on your computer; tick the ones you want and press Enter. For each one it adds the MCP server and, where the agent reads skills from a folder (Claude Code, Codex, Windsurf), these skills. The other agents read the same skills through the MCP server.
+It lists the agents on your computer; tick the ones you want and press Enter. For each one it adds the MCP server (named `desktop-recorder`) and, where the agent reads skills from a folder (Claude Code, Codex, OpenCode), these skills. The other agents read the same skills through the MCP server.
 
 | Skill | What it teaches your agent |
 |---|---|
@@ -41,7 +41,7 @@ While it records, a small red indicator at the bottom of the screen shows the ti
 
 ## Desktop Recorder: record a task and play it again, without AI
 
-The installer also adds **Desktop Recorder**, a small floating bar (Start menu > Desktop Recorder, or `npx agent-record-adapter app`):
+The installer also adds **Desktop Recorder**, a small floating bar (Start menu > Desktop Recorder, or `npx desktop-recorder-mcp app`):
 
 - the round button records what you do in a screen or a window, with or without video, until you press it again;
 - the gear chooses what to record, video or not, and the folder;
@@ -50,7 +50,7 @@ The installer also adds **Desktop Recorder**, a small floating bar (Start menu >
 
 Stopping writes the script that repeats the task (`script.mjs`), without AI. `node script.mjs --help` lists the values you can change each time; with none it repeats the task as recorded.
 
-The complete guide, step by step (the MCP tools, recording, demo videos made by an agent, checking a video, the app, known problems): [GUIDE.md](https://github.com/giancarlo92/agent-desktop/blob/feat/record/packages/agent-record-adapter/GUIDE.md).
+The complete guide, step by step (the MCP tools, recording, demo videos made by an agent, checking a video, the app, known problems): [GUIDE.md](https://github.com/giancarlo92/agent-desktop/blob/feat/record/packages/desktop-recorder-mcp/GUIDE.md).
 
 ## Passwords
 
@@ -66,14 +66,14 @@ agent-record secret delete bank-login
 ## Other commands
 
 ```bash
-npx agent-record-adapter status                     # what is installed, and where
-npx agent-record-adapter --agents claude-code,codex # set up these agents without asking
-npx agent-record-adapter --dry-run                  # say what would change
-npx agent-record-adapter uninstall                  # remove it from the agents you pick
-npx agent-record-adapter app                        # open Desktop Recorder
+npx desktop-recorder-mcp status                     # what is installed, and where
+npx desktop-recorder-mcp --agents claude-code,codex # set up these agents without asking
+npx desktop-recorder-mcp --dry-run                  # say what would change
+npx desktop-recorder-mcp uninstall                  # remove it from the agents you pick
+npx desktop-recorder-mcp app                        # open Desktop Recorder
 ```
 
-The program goes in `%USERPROFILE%\.agent-record-adapter\bin` and its private state (refs, recordings) in `%USERPROFILE%\.agent-record-adapter\state`. Every configuration file it changes keeps a backup next to it (`.bak-agent-record-adapter`).
+The program goes in `%USERPROFILE%\.desktop-recorder-mcp\bin` and its private state (refs, recordings) in `%USERPROFILE%\.desktop-recorder-mcp\state`. Every configuration file it changes keeps a backup next to it (`.bak-desktop-recorder-mcp`).
 
 **Windows for now. macOS and Linux are coming soon.**
 
@@ -91,4 +91,4 @@ Record only your own work, or with the consent of the people whose screen or dat
 
 ## What this is
 
-Agent Record Adapter is not a fork and not the official package. It uses [vercel-labs/agent-desktop](https://github.com/vercel-labs/agent-desktop) and [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) (Apache-2.0) exactly as published, and adds a separate layer: background mode first (an action never uses your mouse or keyboard nor brings a window to the front when there is a way to avoid it; when there is none, the official agent-desktop does it as before), `record` (a person's own actions to JSON Lines, with an MP4 video, `record start`/`stop`/`status` in the background and an on-screen indicator), `secret` (passwords asked for once and kept in the system's secret store), Desktop Recorder, and the skills `agent-record-background`, `desktop-recording`, `recording-to-script` and `script-repair`. Windows for now; macOS and Linux are coming soon. For the official tools alone, use `npm install -g agent-desktop` and `npm install -g agent-browser`.
+Agent Record Adapter is not a fork and not the official package. It uses [vercel-labs/agent-desktop](https://github.com/vercel-labs/agent-desktop) and [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) (Apache-2.0) exactly as published, and adds a separate layer: background mode first (an action never uses your mouse or keyboard nor brings a window to the front when there is a way to avoid it; when there is none, the official agent-desktop does it as before), `record` (a person's own actions to JSON Lines, with an MP4 video, `record start`/`stop`/`status` in the background and an on-screen indicator), `secret` (passwords asked for once and kept in the system's secret store), Desktop Recorder, and the skills `agent-record-background`, `desktop-recording`, `recording-to-script` and `script-repair`. Windows for now; macOS and Linux are coming soon. This package carries everything it needs: it does not need the official npm packages, and installs none.

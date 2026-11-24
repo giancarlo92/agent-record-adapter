@@ -52,6 +52,21 @@ pub(crate) fn record_input(
     record_session::run(request, sink)
 }
 
+/// The address of the page a browser window shows, scheme included: the
+/// page's document first, else the address bar found by its class, so the
+/// browser's language does not matter.
+#[cfg(target_os = "windows")]
+pub(crate) fn browser_address(window_id: &str) -> Option<String> {
+    let root = crate::system::window::window_ops::parse_window_id(window_id).ok()?;
+    let client = crate::tree::automation::automation_client().ok()?;
+    record_browser::address(&client, root)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn browser_address(_window_id: &str) -> Option<String> {
+    None
+}
+
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn record_input(
     _request: &RecordRequest,

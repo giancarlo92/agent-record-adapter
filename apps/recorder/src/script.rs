@@ -62,7 +62,7 @@ pub fn describe(step: &Step) -> String {
             field,
             irreversible: true,
             ..
-        } => format!("Click \"{field}\" (asks before, it cannot be undone)"),
+        } => format!("Click \"{field}\" (asks before it runs)"),
         Action::Click { field, .. } => format!("Click \"{field}\""),
         Action::MenuItem { name } => format!("Choose \"{name}\" in the menu"),
         Action::ClickAt { dx, dy, .. } => {

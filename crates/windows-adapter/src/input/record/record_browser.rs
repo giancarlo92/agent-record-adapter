@@ -11,8 +11,7 @@ use std::time::Duration;
 
 use uiautomation::UIAutomation;
 use uiautomation::patterns::UIValuePattern;
-use uiautomation::types::{Handle, TreeScope, UIProperty};
-use uiautomation::variants::Variant;
+use uiautomation::types::Handle;
 
 use crate::tree::element::UIAElement;
 use crate::tree::properties::property_ids::TreeProperty;
@@ -25,8 +24,6 @@ const BROWSERS: &[&str] = &[
     "vivaldi.exe",
     "opera.exe",
 ];
-
-const ADDRESS_BAR: &str = "Address and search bar";
 
 const CHROMIUM_WIDGET: &str = "Chrome_WidgetWin_1";
 
@@ -101,10 +98,8 @@ pub(super) fn address(client: &UIAutomation, root: isize) -> Option<String> {
     if page.is_some() {
         return page;
     }
-    let condition = client
-        .create_property_condition(UIProperty::Name, Variant::from(ADDRESS_BAR), None)
-        .ok()?;
-    let bar = window.find_first(TreeScope::Descendants, &condition).ok()?;
+    // The address bar, by its class: its name is in the browser's language.
+    let bar = crate::actions::chromium_input::omnibox(root as _, client)?;
     match read_one(&UIAElement::from(bar), TreeProperty::Value) {
         PropertyOutcome::Known(PropertyValue::Text(text)) if !text.trim().is_empty() => {
             Some(text.trim().to_string())

@@ -20,7 +20,11 @@ fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--make-script") && args.len() == 4 {
         let recording = std::fs::read_to_string(&args[2]).unwrap_or_default();
-        let steps = steps::parse(&recording);
+        // The steps marked to ask before they run sit next to the recording.
+        let marks = std::path::Path::new(&args[2])
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let steps = steps::parse_dir(marks, &recording);
         let folder = std::path::Path::new(&args[3]);
         let _ = std::fs::create_dir_all(folder);
         let name = std::path::Path::new(&args[2])

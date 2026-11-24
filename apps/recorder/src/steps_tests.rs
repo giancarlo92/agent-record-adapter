@@ -67,11 +67,99 @@ fn a_form_recording_becomes_the_steps_a_replay_needs() {
     assert!(matches!(
         actions[7],
         Action::Click {
-            irreversible: true,
+            irreversible: false,
             ..
         }
     ));
     assert_eq!(steps.len(), 8);
+    // With no marks, the last click on a button asks before it runs.
+    let mut marked = steps.clone();
+    mark_ask_before(&mut marked, None);
+    assert!(matches!(
+        marked[7].action,
+        Action::Click {
+            irreversible: true,
+            ..
+        }
+    ));
+}
+
+/// A click step on a button with this name.
+fn button_click(name: &str) -> Step {
+    Step {
+        window: WindowRef {
+            id: "w".into(),
+            app: "app.exe".into(),
+            title: "App".into(),
+            path: None,
+            url: None,
+        },
+        action: Action::Click {
+            at: Locator {
+                native_id: None,
+                role: Some("button".into()),
+                name: Some(name.into()),
+                in_document: false,
+            },
+            field: name.into(),
+            irreversible: false,
+        },
+    }
+}
+
+fn asks(steps: &[Step]) -> Vec<bool> {
+    steps
+        .iter()
+        .map(|s| {
+            matches!(
+                s.action,
+                Action::Click {
+                    irreversible: true,
+                    ..
+                }
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_last_button_click_asks_before_whatever_language_its_name_is_in() {
+    for last in [
+        "Send",
+        "Enviar",
+        "Absenden",
+        "送信",
+        "إرسال",
+        "Отправить",
+        "OK",
+    ] {
+        let mut steps = vec![
+            button_click("Next"),
+            button_click("Weiter"),
+            button_click(last),
+        ];
+        mark_ask_before(&mut steps, None);
+        assert_eq!(asks(&steps), [false, false, true], "{last}");
+    }
+}
+
+#[test]
+fn the_person_s_marks_replace_the_default_and_are_kept_next_to_the_recording() {
+    let mut steps = vec![button_click("A"), button_click("B"), button_click("C")];
+    mark_ask_before(&mut steps, Some(&[0]));
+    assert_eq!(asks(&steps), [true, false, false]);
+    mark_ask_before(&mut steps, Some(&[]));
+    assert_eq!(
+        asks(&steps),
+        [false, false, false],
+        "no step asks when none is marked"
+    );
+    let dir = std::env::temp_dir().join(format!("dr-marks-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(read_ask_before(&dir), None);
+    write_ask_before(&dir, &[1, 2]).unwrap();
+    assert_eq!(read_ask_before(&dir), Some(vec![1, 2]));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

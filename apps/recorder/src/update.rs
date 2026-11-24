@@ -1,7 +1,7 @@
 // Part of Agent Record Adapter (see NOTICE).
 //! Keeping the app up to date, like Claude Code and Codex: it asks npm for the latest version of
-//! agent-record-adapter now and then and, when the person chooses to update, runs
-//! `npx agent-record-adapter@<version> update` and waits for it. That installs the new version for
+//! desktop-recorder-mcp now and then and, when the person chooses to update, runs
+//! `npx desktop-recorder-mcp@<version> update` and waits for it. That installs the new version for
 //! the agents already set up (a program in use is set aside, so this app may keep running); then
 //! the app opens the new one and closes. When it fails, the app stays and says why.
 
@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-const PACKAGE: &str = "agent-record-adapter";
+const PACKAGE: &str = "desktop-recorder-mcp";
 
 /// This app's version: what the installer wrote next to it, else the one it was built as.
 pub fn current() -> String {
@@ -96,7 +96,7 @@ pub fn run(version: &str) -> Result<(), String> {
         .map(str::trim)
         .find(|line| !line.is_empty())
         .unwrap_or("npx failed")
-        .trim_start_matches("agent-record-adapter: ")
+        .trim_start_matches("desktop-recorder-mcp: ")
         .to_owned())
 }
 

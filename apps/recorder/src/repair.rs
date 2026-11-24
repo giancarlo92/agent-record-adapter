@@ -66,7 +66,7 @@ pub fn prompt(dir: &Path, spanish: bool) -> String {
         };
         format!(
             "Repara un script de Desktop Recorder que no termina la tarea que se grabó.\n\n\
-             Usa la skill script-repair. Si no la tienes, instálala con `npx agent-record-adapter` \
+             Usa la skill script-repair. Si no la tienes, instálala con `npx desktop-recorder-mcp` \
              (viene con Agent Record Adapter).\n\n\
              Carpeta de la grabación: {folder}\n{files}\n\n{ended}\n\n\
              Cómo trabajar:\n\
@@ -101,7 +101,7 @@ pub fn prompt(dir: &Path, spanish: bool) -> String {
         };
         format!(
             "Repair a Desktop Recorder script that no longer finishes the task that was recorded.\n\n\
-             Use the script-repair skill. If you do not have it, install it with `npx agent-record-adapter` \
+             Use the script-repair skill. If you do not have it, install it with `npx desktop-recorder-mcp` \
              (it comes with Agent Record Adapter).\n\n\
              Recording folder: {folder}\n{files}\n\n{ended}\n\n\
              How to work:\n\

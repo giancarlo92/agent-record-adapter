@@ -52,6 +52,9 @@ pub struct Item {
     pub when: String,
     pub steps: usize,
     pub irreversible: Vec<String>,
+    /// Its steps after the first: place in the step list, what it does, and for a click whether it
+    /// asks before it runs.
+    pub lines: Vec<(usize, String, Option<bool>)>,
     /// Where its last play stopped, read from its log (it outlives the app).
     pub failed: Option<String>,
 }
@@ -76,6 +79,8 @@ pub struct App {
     pub playing: Option<Playing>,
     pub results: Vec<(PathBuf, String)>,
     pub confirm: Option<PathBuf>,
+    /// The recording whose steps are shown, to mark the ones that ask before they run.
+    pub steps_open: Option<PathBuf>,
     pub error: Option<String>,
     pub hidden_from_capture: bool,
     /// Input events held back for the next frame (see `view::steady_clicks`).
@@ -122,6 +127,7 @@ impl App {
             playing: None,
             results: Vec::new(),
             confirm: None,
+            steps_open: None,
             error: tool::agent_desktop()
                 .is_none()
                 .then(|| t.no_tool.to_owned()),
@@ -231,7 +237,7 @@ impl App {
 
     fn item(&self, dir: PathBuf) -> Item {
         let text = std::fs::read_to_string(dir.join("recording.jsonl")).unwrap_or_default();
-        let steps = steps::parse(&text);
+        let steps = steps::parse_dir(&dir, &text);
         let irreversible = steps
             .iter()
             .filter(|s| {
@@ -245,6 +251,20 @@ impl App {
             })
             .map(script::describe)
             .collect();
+        // Every step after the first (which opens the app or the page), and for a click whether
+        // it asks before it runs: the person can change that in the list.
+        let lines = steps
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(index, step)| {
+                let ask = match step.action {
+                    Action::Click { irreversible, .. } => Some(irreversible),
+                    _ => None,
+                };
+                (index, script::describe(step), ask)
+            })
+            .collect();
         let name = dir
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -253,8 +273,32 @@ impl App {
             when: when(&name, self.t.today),
             steps: steps.len().saturating_sub(1),
             irreversible,
+            lines,
             failed: crate::repair::failure(&dir).map(|line| format!("{} {line}", self.t.failed)),
             dir,
+        }
+    }
+
+    /// Turns "ask before it runs" on or off for one click of a recording, keeping the others as
+    /// they are, and saves it next to the recording.
+    pub fn toggle_ask_before(&mut self, dir: &Path, step: usize) {
+        let Some(at) = self.items.iter().position(|i| i.dir == dir) else {
+            return;
+        };
+        let mut marked: Vec<usize> = self.items[at]
+            .lines
+            .iter()
+            .filter(|(_, _, ask)| *ask == Some(true))
+            .map(|(index, _, _)| *index)
+            .collect();
+        if let Some(found) = marked.iter().position(|index| *index == step) {
+            marked.remove(found);
+        } else {
+            marked.push(step);
+            marked.sort_unstable();
+        }
+        if steps::write_ask_before(dir, &marked).is_ok() {
+            self.items[at] = self.item(dir.to_path_buf());
         }
     }
 
@@ -505,7 +549,7 @@ pub fn write_script(dir: &Path) {
         return;
     }
     let text = std::fs::read_to_string(dir.join("recording.jsonl")).unwrap_or_default();
-    let steps = steps::parse(&text);
+    let steps = steps::parse_dir(dir, &text);
     let params = script::candidates(&steps);
     let name = dir
         .file_name()

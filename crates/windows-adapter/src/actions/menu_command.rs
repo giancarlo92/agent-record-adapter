@@ -237,28 +237,17 @@ fn walk(
     Ok(false)
 }
 
-/// Whether the keys a menu shows ("Ctrl+Enter") are the keys asked for
-/// ("ctrl+return"): same modifiers in any order, common key names alike.
+/// Whether the keys a menu shows ("Ctrl+Enter", "Strg+Eingabe") are the keys
+/// asked for ("ctrl+return"): same modifiers in any order, each key known by
+/// any of its names (`key_names`: the English ones and what Windows calls it
+/// in each keyboard layout installed).
 pub(crate) fn same_keys(shown: &str, wanted: &str) -> bool {
     fn normal(text: &str) -> Vec<String> {
         let mut parts: Vec<String> = text
             .split('+')
-            .map(|part| part.trim().to_lowercase())
+            .map(str::trim)
             .filter(|part| !part.is_empty())
-            .map(|part| {
-                match part.as_str() {
-                    "return" => "enter",
-                    "control" | "ctl" => "ctrl",
-                    "esc" => "escape",
-                    "del" => "delete",
-                    "ins" => "insert",
-                    "pgup" | "page up" | "prior" => "pageup",
-                    "pgdn" | "page down" | "next" => "pagedown",
-                    "windows" | "meta" | "super" => "win",
-                    other => other,
-                }
-                .to_owned()
-            })
+            .map(crate::actions::key_names::canonical)
             .collect();
         let rank = |part: &String| match part.as_str() {
             "ctrl" => 0,
@@ -369,12 +358,12 @@ pub(crate) fn same(shown: &str, wanted: &str) -> bool {
 }
 
 /// A shortcut run as the button of the window that does it, through UI
-/// Automation (Invoke), when the app has no classic menu for it: a button that
-/// shows the keys in its name ("Save (Ctrl+S)"), or the button the usual
-/// formatting shortcuts name (ctrl+b "Bold", ctrl+i "Italic", ctrl+u
-/// "Underline"). An app that takes keys only while its editor has the keyboard
-/// (WordCraft) still runs its buttons. `None` when the window has no such
-/// button: the caller presses the keys.
+/// Automation (Invoke), when the app has no classic menu for it: a button whose
+/// accelerator key, or whose name ("Save (Ctrl+S)", "Guardar (Ctrl+G)"), shows
+/// those keys, in whatever language the app names them (`same_keys`). The
+/// button is never looked for by the words of its name. An app that takes keys
+/// only while its editor has the keyboard still runs such buttons. `None` when
+/// the window has no such button: the caller presses the keys.
 pub(crate) fn run_button_shortcut(
     window: &WindowInfo,
     combo: &agent_desktop_core::KeyCombo,
@@ -383,20 +372,21 @@ pub(crate) fn run_button_shortcut(
     use uiautomation::patterns::UIInvokePattern;
     use uiautomation::types::{Handle, TreeScope, UIProperty};
     use uiautomation::variants::Variant;
-    if combo.modifiers.len() != 1 || !matches!(combo.modifiers[0], Modifier::Ctrl) {
+    if combo.modifiers.is_empty() {
         return None;
     }
-    let key = combo.key.to_lowercase();
-    if key.chars().count() != 1 {
-        return None;
-    }
-    let usual = match key.as_str() {
-        "b" => Some("Bold"),
-        "i" => Some("Italic"),
-        "u" => Some("Underline"),
-        _ => None,
-    };
-    let shown = format!("(ctrl+{key})");
+    let mut keys: Vec<&str> = combo
+        .modifiers
+        .iter()
+        .map(|modifier| match modifier {
+            Modifier::Ctrl => "ctrl",
+            Modifier::Alt => "alt",
+            Modifier::Shift => "shift",
+            Modifier::Meta => "win",
+        })
+        .collect();
+    keys.push(&combo.key);
+    let wanted = keys.join("+");
     let hwnd = crate::system::window::window_ops::parse_window_id(&window.id).ok()?;
     let client = crate::tree::automation::automation_client().ok()?;
     let root = client.element_from_handle(Handle::from(hwnd)).ok()?;
@@ -409,10 +399,10 @@ pub(crate) fn run_button_shortcut(
         .ok()?;
     let buttons = root.find_all(TreeScope::Descendants, &condition).ok()?;
     let button = buttons.into_iter().find(|b| {
-        b.get_name().is_ok_and(|name| {
-            usual.is_some_and(|u| name == u)
-                || name.to_lowercase().replace(' ', "").contains(&shown)
-        })
+        b.get_accelerator_key()
+            .is_ok_and(|keys| same_keys(&keys, &wanted))
+            || b.get_name()
+                .is_ok_and(|name| shown_keys(&name).is_some_and(|keys| same_keys(keys, &wanted)))
     })?;
     button
         .get_pattern::<UIInvokePattern>()
@@ -428,9 +418,27 @@ pub(crate) fn run_button_shortcut(
     ))
 }
 
+/// The keys a name shows at its end, in parentheses: "Save (Ctrl+S)" gives
+/// "Ctrl+S". `None` when the name ends with no such keys.
+fn shown_keys(name: &str) -> Option<&str> {
+    let inner = name.trim_end().strip_suffix(')')?;
+    let keys = &inner[inner.rfind('(')? + 1..];
+    keys.contains('+').then_some(keys.trim())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{display_name, same, same_keys};
+    use super::{display_name, same, same_keys, shown_keys};
+
+    #[test]
+    fn a_button_s_keys_are_read_from_its_name_in_any_language() {
+        assert_eq!(shown_keys("Save (Ctrl+S)"), Some("Ctrl+S"));
+        assert_eq!(shown_keys("Guardar (Ctrl+G)"), Some("Ctrl+G"));
+        assert_eq!(shown_keys("保存 (Ctrl+S)"), Some("Ctrl+S"));
+        assert_eq!(shown_keys("Bold"), None);
+        assert_eq!(shown_keys("Notes (draft)"), None);
+        assert!(same_keys(shown_keys("Guardar (Ctrl+G)").unwrap(), "ctrl+g"));
+    }
 
     #[test]
     fn menu_keys_match_the_keys_a_recording_names() {

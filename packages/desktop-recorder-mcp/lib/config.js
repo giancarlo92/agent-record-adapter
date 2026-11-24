@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const BACKUP_SUFFIX = '.bak-agent-record-adapter';
+const BACKUP_SUFFIX = '.bak-desktop-recorder-mcp';
 
 function backup(file) {
   if (fs.existsSync(file) && !fs.existsSync(file + BACKUP_SUFFIX)) {
@@ -117,8 +117,45 @@ function hasToml(mcp, name) {
   return fs.readFileSync(mcp.file, 'utf8').includes(`[mcp_servers.${name}]`);
 }
 
-const add = (mcp, name, server) => (mcp.kind === 'toml' ? addToml : addJson)(mcp, name, server);
-const remove = (mcp, name) => (mcp.kind === 'toml' ? removeToml : removeJson)(mcp, name);
-const has = (mcp, name) => (mcp.kind === 'toml' ? hasToml : hasJson)(mcp, name);
+// OpenCode: its servers are under "mcp" > "servers", each a local command given as one list (the
+// program, then its arguments) with its variables under "environment".
+function addOpenCode(mcp, name, server) {
+  const data = readJson(mcp.file);
+  if (!data.$schema) data.$schema = 'https://opencode.ai/config.json';
+  data.mcp = data.mcp || {};
+  data.mcp.servers = data.mcp.servers || {};
+  const entry = { type: 'local', command: [server.command, ...server.args] };
+  if (server.env && Object.keys(server.env).length) entry.environment = server.env;
+  data.mcp.servers[name] = entry;
+  writeJson(mcp.file, data);
+}
+
+function removeOpenCode(mcp, name) {
+  if (!fs.existsSync(mcp.file)) return false;
+  const data = readJson(mcp.file);
+  const servers = data.mcp && data.mcp.servers;
+  if (!servers || !(name in servers)) return false;
+  delete servers[name];
+  writeJson(mcp.file, data);
+  return true;
+}
+
+function hasOpenCode(mcp, name) {
+  try {
+    const data = readJson(mcp.file);
+    return Boolean(data.mcp && data.mcp.servers && data.mcp.servers[name]);
+  } catch (_) {
+    return false;
+  }
+}
+
+const KINDS = {
+  json: { add: addJson, remove: removeJson, has: hasJson },
+  toml: { add: addToml, remove: removeToml, has: hasToml },
+  opencode: { add: addOpenCode, remove: removeOpenCode, has: hasOpenCode },
+};
+const add = (mcp, name, server) => KINDS[mcp.kind].add(mcp, name, server);
+const remove = (mcp, name) => KINDS[mcp.kind].remove(mcp, name);
+const has = (mcp, name) => KINDS[mcp.kind].has(mcp, name);
 
 module.exports = { add, remove, has, tomlBlock, stripToml, BACKUP_SUFFIX };

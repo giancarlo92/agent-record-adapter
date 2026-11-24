@@ -12,7 +12,7 @@
 //!
 //! Two browsers:
 //! - the **dedicated** Chrome (default): a profile of its own under
-//!   `%LOCALAPPDATA%\AgentRecordAdapter\chrome-profile`, started with no
+//!   `%LOCALAPPDATA%\DesktopRecorder\chrome-profile`, started with no
 //!   window and given one behind the person's ([`chrome`]);
 //! - the person's **daily** Chrome (`--daily [port]`), only when they turned
 //!   its DevTools on; otherwise the desktop commands drive it through window
@@ -83,8 +83,8 @@ pub fn run_with(args: Vec<String>, options: &RunOptions) -> ExitCode {
     }
     let Some(binary) = locate::find_agent_browser() else {
         eprintln!(
-            "agent-record browser: agent-browser was not found. Install it with `npm install -g agent-browser` \
-or set AGENT_RECORD_BROWSER_BIN to its executable."
+            "agent-record browser: agent-browser was not found next to agent-record. Install again with \
+`npx desktop-recorder-mcp`, or set AGENT_RECORD_BROWSER_BIN to its executable."
         );
         return ExitCode::from(127);
     };
@@ -106,16 +106,69 @@ or set AGENT_RECORD_BROWSER_BIN to its executable."
 }
 
 /// `agent-browser mcp` (its stdio MCP server), ready to spawn, with its
-/// browser the dedicated Chrome behind our proxy: Chrome and the proxy are
-/// started when needed. `agent-browser mcp` takes only `--tools` and
-/// `--config`; each tool call runs agent-browser's CLI, which reads its CDP
-/// target from `AGENT_BROWSER_CDP` (a session default, `cli/src/flags.rs`),
-/// so the proxy's port goes there.
-pub fn mcp_command() -> Result<Command, String> {
-    mcp_command_with(&Target::Dedicated, &RunOptions::default())
+/// browser the dedicated Chrome behind our proxy. Nothing is started here: an
+/// agent that starts its MCP server and never opens a web page must not see a
+/// Chrome. The proxy's port is chosen now (agent-browser reads it from
+/// `AGENT_BROWSER_CDP`, a session default, `cli/src/flags.rs`, and lists its
+/// tools without a browser); [`LazyBrowser::ensure`] starts Chrome and the
+/// proxy on that port before each web tool call that needs a page.
+pub fn mcp_command() -> Result<(Command, LazyBrowser), String> {
+    std_handles_not_inherited();
+    let binary = locate::find_agent_browser().ok_or_else(|| {
+        "agent-browser was not found; install it or set AGENT_RECORD_BROWSER_BIN".to_owned()
+    })?;
+    let proxy_port = proxy_port_for(chrome::chrome_port())?;
+    let mut command = locate::command_for(&binary);
+    command
+        .arg("mcp")
+        .env("AGENT_BROWSER_CDP", proxy_port.to_string());
+    Ok((
+        command,
+        LazyBrowser {
+            proxy_port,
+            starting: std::sync::Mutex::new(()),
+        },
+    ))
 }
 
-/// [`mcp_command`] for any target and front.
+/// The dedicated Chrome and the proxy of an `agent-browser mcp` server,
+/// started only when a web tool needs them.
+pub struct LazyBrowser {
+    proxy_port: u16,
+    starting: std::sync::Mutex<()>,
+}
+
+impl LazyBrowser {
+    /// The port agent-browser was told to use.
+    pub fn proxy_port(&self) -> u16 {
+        self.proxy_port
+    }
+
+    /// Makes sure the dedicated Chrome (with a window behind the person's) and
+    /// the proxy on [`Self::proxy_port`] run. Cheap when they already do; one
+    /// call at a time, so two tool calls never start two browsers.
+    pub fn ensure(&self) -> Result<(), String> {
+        let _one = self
+            .starting
+            .lock()
+            .map_err(|_| "the browser start failed earlier".to_owned())?;
+        let chrome_port = chrome::ensure_dedicated()?;
+        ensure_proxy_at(chrome_port, &RunOptions::default(), self.proxy_port)
+    }
+}
+
+/// The agent-browser tools that never touch a page: they run without starting
+/// the browser.
+pub fn tool_needs_browser(name: &str) -> bool {
+    !matches!(
+        name,
+        "agent_browser_tools_profiles"
+            | "agent_browser_flow_list"
+            | "agent_browser_flow_steps"
+            | "agent_browser_flow_save"
+    )
+}
+
 /// Windows gives every child all the inheritable handles of its parent, with
 /// null standard streams too: a detached Chrome or proxy started from here
 /// would hold the caller's pipe open, and a caller reading our output would
@@ -139,19 +192,6 @@ fn std_handles_not_inherited() {
             }
         }
     }
-}
-
-pub fn mcp_command_with(target: &Target, options: &RunOptions) -> Result<Command, String> {
-    std_handles_not_inherited();
-    let binary = locate::find_agent_browser().ok_or_else(|| {
-        "agent-browser was not found; install it or set AGENT_RECORD_BROWSER_BIN".to_owned()
-    })?;
-    let proxy_port = prepare(target, options)?;
-    let mut command = locate::command_for(&binary);
-    command
-        .arg("mcp")
-        .env("AGENT_BROWSER_CDP", proxy_port.to_string());
-    Ok(command)
 }
 
 /// Makes sure the browser of `target` and its proxy run; returns the proxy's
@@ -290,19 +330,84 @@ pub fn ensure_proxy(
     ws_path: Option<&str>,
     options: &RunOptions,
 ) -> Result<u16, String> {
-    let state = proxy_state(chrome_port);
-    if let Some(port) = std::fs::read(&state)
-        .ok()
-        .and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok())
-        .and_then(|v| u16::try_from(v.get("port")?.as_u64()?).ok())
-        && proxy::probe_running(port) == Some(chrome_port)
+    if let Some(port) = running_proxy(chrome_port) {
+        return Ok(port);
+    }
+    let port = proxy_port_for(chrome_port)?;
+    start_proxy(chrome_port, ws_path, options, port)?;
+    Ok(port)
+}
+
+/// Makes sure a proxy for Chrome's `chrome_port` answers on `port`, the one an
+/// `agent-browser mcp` server was told to use.
+fn ensure_proxy_at(chrome_port: u16, options: &RunOptions, port: u16) -> Result<(), String> {
+    match proxy::probe_running(port) {
+        Some(running) if running == chrome_port => Ok(()),
+        Some(running) => Err(format!(
+            "port {port} serves another browser's proxy (DevTools port {running}); start the agent again"
+        )),
+        None => start_proxy(chrome_port, None, options, port),
+    }
+}
+
+/// The port the proxy of Chrome's `chrome_port` answers on, or will. It stays
+/// the same from one start to the next: agent-browser keeps a daemon that
+/// remembers the port it was first given, so a proxy started again (after the
+/// browser was closed) must come back on that port. The running proxy's port,
+/// else `AGENT_RECORD_PROXY_PORT` (for the dedicated Chrome), else the port
+/// saved for it when that port is free, else a free one, saved for next time.
+fn proxy_port_for(chrome_port: u16) -> Result<u16, String> {
+    if let Some(port) = running_proxy(chrome_port) {
+        return Ok(port);
+    }
+    if chrome_port == chrome::chrome_port()
+        && let Some(port) = chrome::env_port("AGENT_RECORD_PROXY_PORT")
     {
         return Ok(port);
     }
-    let port = chrome::env_port("AGENT_RECORD_PROXY_PORT")
-        .filter(|_| chrome_port == chrome::chrome_port())
-        .map_or_else(free_port, Ok)
-        .map_err(|e| format!("no free port for the DevTools proxy: {e}"))?;
+    if let Some(port) = saved_proxy_port(chrome_port).filter(|port| port_is_free(*port)) {
+        return Ok(port);
+    }
+    let port = free_port().map_err(|e| format!("no free port for the DevTools proxy: {e}"))?;
+    save_proxy_state(chrome_port, port, None);
+    Ok(port)
+}
+
+/// The port saved for the proxy of Chrome's `chrome_port`, running or not.
+fn saved_proxy_port(chrome_port: u16) -> Option<u16> {
+    let raw = std::fs::read(proxy_state(chrome_port)).ok()?;
+    let state = serde_json::from_slice::<serde_json::Value>(&raw).ok()?;
+    u16::try_from(state.get("port")?.as_u64()?).ok()
+}
+
+/// The port of a proxy already running for Chrome's `chrome_port`.
+fn running_proxy(chrome_port: u16) -> Option<u16> {
+    saved_proxy_port(chrome_port).filter(|port| proxy::probe_running(*port) == Some(chrome_port))
+}
+
+fn port_is_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+fn save_proxy_state(chrome_port: u16, port: u16, pid: Option<u32>) {
+    let state = proxy_state(chrome_port);
+    if let Some(parent) = state.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(
+        &state,
+        json!({ "port": port, "pid": pid, "chrome_port": chrome_port }).to_string(),
+    );
+}
+
+/// Starts the proxy process (detached, the running executable) for Chrome's
+/// `chrome_port` on `port`, and waits until it answers.
+fn start_proxy(
+    chrome_port: u16,
+    ws_path: Option<&str>,
+    options: &RunOptions,
+    port: u16,
+) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = Command::new(exe);
     command
@@ -335,14 +440,8 @@ pub fn ensure_proxy(
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    if let Some(parent) = state.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(
-        &state,
-        json!({ "port": port, "pid": child.id(), "chrome_port": chrome_port }).to_string(),
-    );
-    Ok(port)
+    save_proxy_state(chrome_port, port, Some(child.id()));
+    Ok(())
 }
 
 fn free_port() -> std::io::Result<u16> {
@@ -421,5 +520,19 @@ mod tests {
         assert!(passes_through(&strings(&[])));
         assert!(!passes_through(&strings(&["open", "file:///C:/a.html"])));
         assert!(!passes_through(&strings(&["snapshot", "-i"])));
+    }
+
+    #[test]
+    fn only_tools_that_touch_a_page_start_the_browser() {
+        for name in [
+            "agent_browser_open",
+            "agent_browser_snapshot",
+            "agent_browser_flow_run",
+        ] {
+            assert!(tool_needs_browser(name), "{name}");
+        }
+        for name in ["agent_browser_tools_profiles", "agent_browser_flow_list"] {
+            assert!(!tool_needs_browser(name), "{name}");
+        }
     }
 }

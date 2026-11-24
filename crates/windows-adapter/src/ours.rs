@@ -86,6 +86,10 @@ impl RecordOps for WindowsAdapter {
         crate::input::record::record_input(request, sink)
     }
 
+    fn browser_address(&self, window_id: &str) -> Option<String> {
+        crate::input::record::browser_address(window_id)
+    }
+
     fn ask_secret(&self, title: &str, message: &str) -> Result<Option<String>, AdapterError> {
         crate::input::secret_prompt::ask(title, message)
     }

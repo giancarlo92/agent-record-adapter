@@ -19,6 +19,8 @@ const TOP_GAP: f32 = 12.0;
 const BOTTOM: f32 = 12.0;
 const LABEL: f32 = 13.0;
 const CAPTION: f32 = 12.0;
+/// One step in a recording's step list.
+const STEP_LINE: f32 = 18.0;
 
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -477,14 +479,7 @@ impl App {
     fn list(&mut self, ui: &mut Ui, top: f32, p: &Palette) -> f32 {
         let mut heights = Vec::new();
         for item in &self.items {
-            heights.push(
-                ROW + self.status(item).map_or(0.0, |lines| {
-                    lines
-                        .iter()
-                        .map(|(text, _)| status_line(ui, text, p.secondary).size().y + 1.0)
-                        .sum()
-                }),
-            );
+            heights.push(ROW + self.status_height(ui, item, p) + self.steps_height(item));
         }
         let empty = if self.items.is_empty() { ROW } else { 0.0 };
         let card = Rect::from_min_size(
@@ -506,6 +501,8 @@ impl App {
         }
         let mut play = None;
         let mut cancel = false;
+        let mut open_steps: Option<std::path::PathBuf> = None;
+        let mut toggle: Option<(std::path::PathBuf, usize)> = None;
         let mut repair: Option<(std::path::PathBuf, bool)> = None;
         let mut hovered_repair = None;
         let count = self.items.len();
@@ -538,6 +535,22 @@ impl App {
                 pos2(repair_at.center().x - 9.0 - 10.0 - 9.0, line.y),
                 vec2(24.0, 24.0),
             );
+            // The recording's line opens (and closes) the list of its steps.
+            let label_at = Rect::from_min_max(
+                pos2(8.0, y + 4.0),
+                pos2(play_at.left() - 8.0, y + ROW - 4.0),
+            );
+            if item.steps > 0
+                && button(
+                    ui,
+                    label_at,
+                    &format!("steps{}", item.dir.display()),
+                    self.t.show_steps,
+                )
+                .clicked()
+            {
+                open_steps = Some(item.dir.clone());
+            }
             let can_play = self.playing.is_none() && item.steps > 0;
             let response = button(
                 ui,
@@ -640,10 +653,96 @@ impl App {
                     }
                 }
             }
+            if self.steps_open.as_ref() == Some(&item.dir) {
+                let mut at = y + ROW + self.status_height(ui, item, p);
+                ui.painter().text(
+                    pos2(12.0, at + STEP_LINE / 2.0),
+                    Align2::LEFT_CENTER,
+                    self.t.mark_hint,
+                    FontId::proportional(CAPTION),
+                    p.secondary,
+                );
+                at += STEP_LINE;
+                for (index, text, ask) in &item.lines {
+                    let line =
+                        Rect::from_min_size(pos2(8.0, at), vec2(PANEL_WIDTH - 16.0, STEP_LINE));
+                    let text = fit(ui, text, PANEL_WIDTH - 44.0, CAPTION);
+                    if let Some(on) = ask {
+                        // A click: a box that says whether it asks before it runs.
+                        // A checkbox for screen readers and agents too, ticked when it asks.
+                        let response = ui.interact(
+                            line,
+                            ui.id().with(format!("ask{}#{index}", item.dir.display())),
+                            Sense::click(),
+                        );
+                        response.widget_info(|| {
+                            WidgetInfo::selected(WidgetType::Checkbox, true, *on, &text)
+                        });
+                        let mark =
+                            Rect::from_center_size(pos2(19.0, line.center().y), vec2(11.0, 11.0));
+                        let color = if response.hovered() { p.accent } else { p.text };
+                        if *on {
+                            ui.painter().rect_filled(mark, 2.0, p.accent_fill);
+                            ui.painter().line_segment(
+                                [
+                                    pos2(mark.left() + 2.5, mark.center().y),
+                                    pos2(mark.center().x - 0.5, mark.bottom() - 3.0),
+                                ],
+                                Stroke::new(1.5, p.on_accent),
+                            );
+                            ui.painter().line_segment(
+                                [
+                                    pos2(mark.center().x - 0.5, mark.bottom() - 3.0),
+                                    pos2(mark.right() - 2.5, mark.top() + 2.5),
+                                ],
+                                Stroke::new(1.5, p.on_accent),
+                            );
+                        } else {
+                            ui.painter().rect_stroke(
+                                mark,
+                                2.0,
+                                Stroke::new(1.0, color),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                        ui.painter().text(
+                            pos2(32.0, line.center().y),
+                            Align2::LEFT_CENTER,
+                            text,
+                            FontId::proportional(CAPTION),
+                            color,
+                        );
+                        if response.clicked() {
+                            toggle = Some((item.dir.clone(), *index));
+                        }
+                    } else {
+                        ui.painter().text(
+                            pos2(32.0, line.center().y),
+                            Align2::LEFT_CENTER,
+                            text,
+                            FontId::proportional(CAPTION),
+                            p.secondary,
+                        );
+                    }
+                    at += STEP_LINE;
+                }
+            }
             y += height;
             if index + 1 < count {
                 hairline(ui, y, p);
             }
+        }
+        if let Some(dir) = open_steps {
+            self.steps_open = if self.steps_open.as_ref() == Some(&dir) {
+                None
+            } else {
+                Some(dir)
+            };
+            ui.ctx().request_repaint();
+        }
+        if let Some((dir, step)) = toggle {
+            self.toggle_ask_before(&dir, step);
+            ui.ctx().request_repaint();
         }
         if hovered_repair != self.hovered_repair {
             self.hovered_repair = hovered_repair;
@@ -664,6 +763,25 @@ impl App {
             self.ask_to_play(&dir);
         }
         y
+    }
+
+    /// The height of the lines under a recording (see [`Self::status`]).
+    fn status_height(&self, ui: &Ui, item: &crate::app::Item, p: &Palette) -> f32 {
+        self.status(item).map_or(0.0, |lines| {
+            lines
+                .iter()
+                .map(|(text, _)| status_line(ui, text, p.secondary).size().y + 1.0)
+                .sum()
+        })
+    }
+
+    /// The height of a recording's step list, when it is open: a hint and one line per step.
+    fn steps_height(&self, item: &crate::app::Item) -> f32 {
+        if self.steps_open.as_ref() == Some(&item.dir) {
+            STEP_LINE * (item.lines.len() as f32 + 1.0) + 6.0
+        } else {
+            0.0
+        }
     }
 
     /// The lines under a recording: playing, how it ended, or the steps to confirm.

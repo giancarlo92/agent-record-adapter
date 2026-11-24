@@ -33,7 +33,7 @@ let found = null;
  */
 export function agentDesktop() {
   if (found) return found;
-  const installed = join(homedir(), '.agent-record-adapter', 'bin', exe);
+  const installed = join(homedir(), '.desktop-recorder-mcp', 'bin', exe);
   const candidates = [process.env.AGENT_RECORD_BIN, existsSync(installed) ? installed : null, 'agent-record'];
   for (const candidate of candidates.filter(Boolean)) {
     try {
@@ -41,17 +41,17 @@ export function agentDesktop() {
       execFileSync(candidate, ['navigate', '--help'], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
     } catch (error) {
       if (error.code === 'ENOENT') continue;
-      throw new ScriptError(`${candidate} is not agent-record: run "npx agent-record-adapter" or set AGENT_RECORD_BIN`);
+      throw new ScriptError(`${candidate} is not agent-record: run "npx desktop-recorder-mcp" or set AGENT_RECORD_BIN`);
     }
     found = candidate;
     return found;
   }
-  throw new ScriptError('agent-record was not found: run "npx agent-record-adapter" or set AGENT_RECORD_BIN');
+  throw new ScriptError('agent-record was not found: run "npx desktop-recorder-mcp" or set AGENT_RECORD_BIN');
 }
 
 function environment() {
   const env = { ...process.env };
-  const state = join(homedir(), '.agent-record-adapter', 'state');
+  const state = join(homedir(), '.desktop-recorder-mcp', 'state');
   if (!env.AGENT_DESKTOP_HOME && existsSync(state)) env.AGENT_DESKTOP_HOME = state;
   // A script runs in the background: background mode on, whatever the shell says.
   env.AGENT_DESKTOP_BACKGROUND = '1';
@@ -76,7 +76,7 @@ export function run(...args) {
           const options = details && Array.isArray(details.options) ? ` (its options: ${details.options.join(', ')})` : '';
           // An option this agent-record does not know: it is older than this file.
           const older = code === 'INVALID_ARGS' && /unexpected argument|unrecognized subcommand/.test(message || '')
-            ? ` (${agentDesktop()} is older than desktop-script.mjs: install the agent-record-adapter this script came with)`
+            ? ` (${agentDesktop()} is older than desktop-script.mjs: install the desktop-recorder-mcp this script came with)`
             : '';
           reject(new ScriptError(`${args[0]}: ${code} ${message}${options}${older}`, { code, disposition, details }));
         }
@@ -522,7 +522,7 @@ function closeBrowser({ pid, image }) {
  * open by an earlier run (a failed run, or one stopped with --stop-before) is closed first.
  */
 export async function openBrowser(url, { title, profile, browser, timeoutMs = 30000 } = {}) {
-  const dir = profile || join(homedir(), '.agent-record-adapter', 'script-browser');
+  const dir = profile || join(homedir(), '.desktop-recorder-mcp', 'script-browser');
   const exePath = browser || chromePath();
   const image = exePath.split(/[\\/]/).pop();
   const pidFile = join(dir, PID_FILE);

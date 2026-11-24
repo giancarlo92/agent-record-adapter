@@ -5,7 +5,7 @@
 # Usage: agent-record-test.sh <agent-record.exe>
 set -u
 AD="$1"
-export AGENT_DESKTOP_HOME="$LOCALAPPDATA/AgentRecordAdapter/tmp/js-state" TEMP="$LOCALAPPDATA/AgentRecordAdapter/tmp" TMP="$LOCALAPPDATA/AgentRecordAdapter/tmp"
+export AGENT_DESKTOP_HOME="$LOCALAPPDATA/DesktopRecorder/tmp/js-state" TEMP="$LOCALAPPDATA/DesktopRecorder/tmp" TMP="$LOCALAPPDATA/DesktopRecorder/tmp"
 D="$USERPROFILE/AprendeReplica-e2e/enter-test"; WD=$(cygpath -w "$D"); F="$D/rec-snap.json"; OUT="$D/agent-record.jsonl"; rm -f "$OUT"
 "$AD" launch "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --no-attach "--arg=--user-data-dir=$WD\\profile-rec" --arg=--no-first-run "--arg=file:///$(cygpath -m "$D/sgh-like.html")" --timeout 30000 >/dev/null
 sleep 3

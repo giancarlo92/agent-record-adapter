@@ -93,13 +93,25 @@ function agents(home, env) {
       skillsDir: null,
     },
     {
-      id: 'windsurf',
-      name: 'Windsurf',
-      detect: () => fs.existsSync(path.join(home, '.codeium', 'windsurf')) || onPath('windsurf', env),
-      mcp: { kind: 'json', file: path.join(home, '.codeium', 'windsurf', 'mcp_config.json'), key: 'mcpServers' },
-      skillsDir: path.join(home, '.codeium', 'windsurf', 'skills'),
+      id: 'opencode',
+      name: 'OpenCode',
+      detect: () => fs.existsSync(openCodeDir(home)) || onPath('opencode', env),
+      mcp: { kind: 'opencode', file: openCodeConfig(home) },
+      skillsDir: path.join(openCodeDir(home), 'skills'),
     },
   ];
+}
+
+/** OpenCode's global folder: ~/.config/opencode on every system, Windows included. */
+function openCodeDir(home) {
+  return path.join(home, '.config', 'opencode');
+}
+
+/** OpenCode reads opencode.json or opencode.jsonc there: the one that exists, else opencode.json. */
+function openCodeConfig(home) {
+  const jsonc = path.join(openCodeDir(home), 'opencode.jsonc');
+  const json = path.join(openCodeDir(home), 'opencode.json');
+  return fs.existsSync(jsonc) && !fs.existsSync(json) ? jsonc : json;
 }
 
 module.exports = { agents, onPath };

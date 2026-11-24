@@ -4,7 +4,7 @@
 # Studio) in a background Chrome. Usage: studio-picker-test.sh <agent-record.exe> <plain|cdp> [keep]
 set -u
 AD="$1"; MODE="$2"; KEEP="${3:-}"
-export AGENT_DESKTOP_HOME="$LOCALAPPDATA/AgentRecordAdapter/tmp/js-state" TEMP="$LOCALAPPDATA/AgentRecordAdapter/tmp" TMP="$LOCALAPPDATA/AgentRecordAdapter/tmp"
+export AGENT_DESKTOP_HOME="$LOCALAPPDATA/DesktopRecorder/tmp/js-state" TEMP="$LOCALAPPDATA/DesktopRecorder/tmp" TMP="$LOCALAPPDATA/DesktopRecorder/tmp"
 unset AGENT_DESKTOP_SESSION
 D="$USERPROFILE/AprendeReplica-e2e/enter-test"; WD=$(cygpath -w "$D"); F="$D/studio-snap.json"
 FORM="$D/studio.html"

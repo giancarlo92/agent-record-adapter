@@ -8,12 +8,11 @@ use std::path::{Path, PathBuf};
 ///    gives the MCP server this one);
 /// 2. next to the running executable (`agent-browser.exe`, or the npm
 ///    package's `agent-browser-win32-x64.exe`);
-/// 3. our installer's private npm prefix,
-///    `~/.agent-record-adapter/browser/node_modules`: the native executable
-///    inside the package (its `bin/` or its platform package), then the
-///    `.bin/agent-browser(.cmd)` shim;
-/// 4. the npm global install (`%APPDATA%\npm\node_modules`), the same way;
-/// 5. `PATH` (`agent-browser.exe`, then the npm shim `agent-browser.cmd`).
+/// 3. the installer's program folder, `~/.desktop-recorder-mcp/bin`, which
+///    carries agent-browser built from its unmodified sources;
+/// 4. only for a repository checkout with no install: the npm global install
+///    (`%APPDATA%\npm\node_modules`), then `PATH` (`agent-browser.exe`, then
+///    the npm shim `agent-browser.cmd`).
 pub fn find_agent_browser() -> Option<PathBuf> {
     for var in ["AGENT_RECORD_BROWSER_BIN", "AGENT_BROWSER_BIN"] {
         if let Some(path) = std::env::var_os(var).filter(|p| !p.is_empty()) {
@@ -27,8 +26,8 @@ pub fn find_agent_browser() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME"))
         .map(|home| {
             PathBuf::from(home)
-                .join(".agent-record-adapter")
-                .join("browser")
+                .join(".desktop-recorder-mcp")
+                .join("bin")
         });
     let npm = std::env::var_os("APPDATA").map(|appdata| PathBuf::from(appdata).join("npm"));
     candidates(next_to_exe.as_deref(), private.as_deref(), npm.as_deref())
@@ -37,11 +36,11 @@ pub fn find_agent_browser() -> Option<PathBuf> {
         .or_else(|| on_path(&["agent-browser.exe", "agent-browser.cmd", "agent-browser"]))
 }
 
-/// The fixed places to look, in order. `private_prefix` is our installer's
-/// npm prefix; `npm_dir` the global npm folder (`%APPDATA%\npm`).
+/// The fixed places to look, in order. `install_bin` is the installer's
+/// program folder; `npm_dir` the global npm folder (`%APPDATA%\npm`).
 pub fn candidates(
     exe_dir: Option<&Path>,
-    private_prefix: Option<&Path>,
+    install_bin: Option<&Path>,
     npm_dir: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut found = Vec::new();
@@ -49,11 +48,8 @@ pub fn candidates(
         found.push(dir.join("agent-browser.exe"));
         found.push(dir.join("agent-browser-win32-x64.exe"));
     }
-    if let Some(prefix) = private_prefix {
-        let modules = prefix.join("node_modules");
-        found.extend(native_in(&modules));
-        found.push(modules.join(".bin").join("agent-browser.exe"));
-        found.push(modules.join(".bin").join("agent-browser.cmd"));
+    if let Some(bin) = install_bin {
+        found.push(bin.join("agent-browser.exe"));
     }
     if let Some(npm) = npm_dir {
         found.extend(native_in(&npm.join("node_modules")));
@@ -113,31 +109,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exe_dir_then_private_prefix_then_npm() {
+    fn exe_dir_then_install_folder_then_npm() {
         let app = Path::new("app");
-        let private = Path::new("home")
-            .join(".agent-record-adapter")
-            .join("browser");
+        let bin = Path::new("home").join(".desktop-recorder-mcp").join("bin");
         let npm = Path::new("npm");
-        let found = candidates(Some(app), Some(&private), Some(npm));
+        let found = candidates(Some(app), Some(&bin), Some(npm));
         assert_eq!(found[0], app.join("agent-browser.exe"));
-        assert_eq!(
-            found[2],
-            private
-                .join("node_modules")
-                .join("agent-browser")
-                .join("bin")
-                .join("agent-browser-win32-x64.exe")
+        assert_eq!(found[2], bin.join("agent-browser.exe"));
+        assert!(
+            found[3..]
+                .iter()
+                .all(|path| path.starts_with(npm.join("node_modules")))
         );
-        assert_eq!(
-            found[6],
-            private
-                .join("node_modules")
-                .join(".bin")
-                .join("agent-browser.cmd")
-        );
-        assert!(found[7].starts_with(npm.join("node_modules")));
-        assert_eq!(found.len(), 10);
+        assert_eq!(found.len(), 6);
     }
 
     #[test]

@@ -148,28 +148,6 @@ const EDIT_KEYS: &[&str] = &[
     "ctrl+z",
     "escape",
 ];
-/// Words on a button that does something that cannot be taken back.
-const IRREVERSIBLE: &[&str] = &[
-    "send",
-    "submit",
-    "delete",
-    "remove",
-    "pay",
-    "buy",
-    "purchase",
-    "publish",
-    "post",
-    "transfer",
-    "confirm",
-    "enviar",
-    "eliminar",
-    "borrar",
-    "pagar",
-    "comprar",
-    "publicar",
-    "transferir",
-    "confirmar",
-];
 /// Ids that name a kind of element rather than one element.
 const GENERIC_IDS: &[&str] = &[
     "RootWebArea",
@@ -329,13 +307,12 @@ pub fn parse(recording: &str) -> Vec<Step> {
                 } else if !NO_ACTION_ROLES.contains(&role.as_str())
                     && (at.native_id.is_some() || !name.is_empty())
                 {
-                    let irreversible = is_irreversible(&name);
                     steps.push(step(
                         &window,
                         Action::Click {
                             at,
                             field: name,
-                            irreversible,
+                            irreversible: false,
                         },
                     ));
                 } else if role.is_empty()
@@ -441,13 +418,12 @@ pub fn parse(recording: &str) -> Vec<Step> {
                     && ((keys == "space" && role == "checkbox")
                         || (keys == "return" && matches!(role.as_str(), "button" | "link")))
                 {
-                    let irreversible = is_irreversible(&name);
                     steps.push(step(
                         &window,
                         Action::Click {
                             at,
                             field: name,
-                            irreversible,
+                            irreversible: false,
                         },
                     ));
                     continue;
@@ -725,13 +701,6 @@ fn short_title(window: &WindowRef) -> String {
         .to_owned()
 }
 
-fn is_irreversible(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    lower
-        .split(|c: char| !c.is_alphanumeric())
-        .any(|word| IRREVERSIBLE.contains(&word))
-}
-
 /// A name for the password of this app or site: `opensource-demo-orangehrmlive-com-login`, `wordcraft-login`.
 fn secret_name(window: &WindowRef) -> String {
     let local_file = |url: &str| url.starts_with("file:") || url.as_bytes().get(1) == Some(&b':');
@@ -811,3 +780,52 @@ impl DateParts {
 #[cfg(test)]
 #[path = "steps_tests.rs"]
 mod tests;
+
+/// The file next to a recording that lists the steps that ask before they run
+/// (their places in the step list), as the person marked them in the app.
+pub const ASK_BEFORE_FILE: &str = "ask-before.json";
+
+/// Marks which clicks ask before they run: the steps the person marked, else
+/// the last click on a button, the one that usually ends a task (it sends,
+/// saves, pays). By the step's place and role, never by the words on the
+/// button, so it is the same in every language.
+pub fn mark_ask_before(steps: &mut [Step], marked: Option<&[usize]>) {
+    let last_button = steps.iter().rposition(|step| {
+        matches!(&step.action, Action::Click { at, .. } if at.role.as_deref() == Some("button"))
+    });
+    for (index, step) in steps.iter_mut().enumerate() {
+        if let Action::Click { irreversible, .. } = &mut step.action {
+            *irreversible = match marked {
+                Some(list) => list.contains(&index),
+                None => Some(index) == last_button,
+            };
+        }
+    }
+}
+
+/// The steps the person marked in a recording's folder, if they marked any.
+pub fn read_ask_before(dir: &std::path::Path) -> Option<Vec<usize>> {
+    let text = std::fs::read_to_string(dir.join(ASK_BEFORE_FILE)).ok()?;
+    serde_json::from_str::<Value>(&text).ok()?["steps"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|v| v.as_u64().and_then(|n| usize::try_from(n).ok()))
+                .collect()
+        })
+}
+
+/// Saves the steps that ask before they run, for the app and the script.
+pub fn write_ask_before(dir: &std::path::Path, marked: &[usize]) -> std::io::Result<()> {
+    std::fs::write(
+        dir.join(ASK_BEFORE_FILE),
+        serde_json::json!({ "steps": marked }).to_string(),
+    )
+}
+
+/// The steps of the recording in `dir`, with the clicks that ask before they run.
+pub fn parse_dir(dir: &std::path::Path, recording: &str) -> Vec<Step> {
+    let mut steps = parse(recording);
+    mark_ask_before(&mut steps, read_ask_before(dir).as_deref());
+    steps
+}

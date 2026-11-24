@@ -19,7 +19,6 @@ use crate::context::CommandContext;
 
 const MAX_NAME: usize = 64;
 const MAX_SECRET: usize = 1_024;
-const ADDRESS_BAR: &str = "Address and search bar";
 
 pub struct SetArgs {
     pub name: String,
@@ -248,46 +247,18 @@ fn remember(name: &str, secret: &StoredSecret) -> Result<SecretInfo, AppError> {
     Ok(info)
 }
 
-/// The address bar's text in the field's browser window, if it has one.
+/// The address of the page in the field's browser window, if it shows one.
+/// The platform reads it without the browser's language (the page's own
+/// address, else the address bar found by its kind, never by its name).
 fn browser_address(
     entry: &crate::RefEntry,
     adapter: &dyn PlatformAdapter,
-    context: &CommandContext,
+    _context: &CommandContext,
 ) -> Option<String> {
-    use agent_desktop_core::commands::find::{self, FindArgs, FindFilterArgs, FindSelectionArgs};
-    let found = find::execute(
-        FindArgs {
-            app: entry.source.source_app.clone(),
-            window_id: entry.source.source_window_id.clone(),
-            root: None,
-            surface: crate::SnapshotSurface::Window,
-            filter: FindFilterArgs {
-                role: Some("textfield".into()),
-                name: Some(ADDRESS_BAR.into()),
-                description: None,
-                native_id: None,
-                value: None,
-                text: None,
-                exact: true,
-            },
-            states: Vec::new(),
-            selection: FindSelectionArgs {
-                count: false,
-                first: true,
-                last: false,
-                nth: None,
-                limit: None,
-            },
-            timeout_ms: Some(5_000),
-        },
-        adapter,
-        context,
-    )
-    .ok()?;
-    found["match"]["value"]
-        .as_str()
+    let window = entry.source.source_window_id.as_deref()?;
+    adapter
+        .browser_address(window)
         .filter(|text| !text.is_empty())
-        .map(String::from)
 }
 
 fn redact_error(error: AppError, secret: &str) -> AppError {
