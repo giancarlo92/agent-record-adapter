@@ -39,11 +39,12 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_TAB,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, EnumWindows, GA_ROOT, GUITHREADINFO, GetAncestor,
-    GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, HC_ACTION,
-    IsWindowVisible, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLKHF_UP, MSG, MsgWaitForMultipleObjects,
-    PM_REMOVE, PeekMessageW, QS_ALLINPUT, SMTO_ABORTIFHUNG, SendMessageTimeoutW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_NULL, WindowFromPoint,
+    CallNextHookEx, DispatchMessageW, EnumChildWindows, EnumWindows, GA_ROOT, GUITHREADINFO,
+    GetAncestor, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
+    HC_ACTION, IsWindowVisible, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLKHF_UP, MSG,
+    MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT, SMTO_ABORTIFHUNG,
+    SendMessageTimeoutW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+    WM_NULL, WindowFromPoint,
 };
 
 /// How long after an action the target's activation is still watched for:
@@ -63,6 +64,13 @@ pub(crate) struct Target {
     /// Whether its new windows also go to the bottom of the stack, and if so
     /// whether Chromium windows do too (see `behind`).
     pub(crate) to_back: Option<bool>,
+    /// For a launch: the top-level windows open before it started. A window
+    /// that was not among them is the launched program's too, whatever process
+    /// shows it: a packaged app is started by the system's broker, not by the
+    /// program launched, and a single-instance app hands over to the instance
+    /// already running. It counts only while the person has not clicked or
+    /// pressed a key (then a new window may be one they opened).
+    pub(crate) new_windows: Option<Vec<isize>>,
 }
 
 struct Watch {
@@ -85,6 +93,10 @@ struct Watch {
     /// window), not as soon as the target takes it, which would deactivate it
     /// in the middle of the input.
     hold: Option<Arc<AtomicBool>>,
+    /// Whether the person clicked or pressed a key since the guard started.
+    person_acted: bool,
+    /// Whether each top-level window seen in front hosts a window of the target.
+    hosts: Vec<(isize, bool)>,
 }
 
 thread_local! {
@@ -162,9 +174,52 @@ impl Watch {
         same_image
     }
 
+    /// Whether `window` is the target's: a window of its program, or, for a
+    /// launch, a window that was not open before it (see `Target::new_windows`).
+    fn is_target_window(&mut self, window: HWND) -> bool {
+        if self.is_target(process_of(window)) || self.hosts_target(window) {
+            return true;
+        }
+        !self.person_acted
+            && self
+                .target
+                .new_windows
+                .as_ref()
+                .is_some_and(|before| !before.contains(&(window as isize)))
+    }
+
+    /// Whether `window` holds a child window of the target: a packaged (UWP)
+    /// app's window is a frame of another process (ApplicationFrameHost) that
+    /// hosts the app's own window.
+    fn hosts_target(&mut self, window: HWND) -> bool {
+        if let Some((_, hosts)) = self.hosts.iter().find(|(seen, _)| *seen == window as isize) {
+            return *hosts;
+        }
+        unsafe extern "system" fn collect(child: HWND, data: isize) -> i32 {
+            let found = unsafe { &mut *(data as *mut Vec<u32>) };
+            let pid = process_of(child);
+            if !found.contains(&pid) {
+                found.push(pid);
+            }
+            1
+        }
+        let mut pids: Vec<u32> = Vec::new();
+        unsafe { EnumChildWindows(window, Some(collect), &mut pids as *mut _ as isize) };
+        let own = process_of(window);
+        let hosts = pids
+            .into_iter()
+            .filter(|pid| *pid != own)
+            .any(|pid| self.is_target(pid));
+        self.hosts.push((window as isize, hosts));
+        hosts
+    }
+
     /// Notes what the person is doing with the mouse and the switching keys.
     fn observe_person(&mut self) {
         let down = key_down(VK_LBUTTON) || key_down(VK_RBUTTON) || key_down(VK_MBUTTON);
+        if down {
+            self.person_acted = true;
+        }
         if down && !self.button_down {
             let mut point = POINT { x: 0, y: 0 };
             unsafe { GetCursorPos(&mut point) };
@@ -195,13 +250,13 @@ impl Watch {
         if self.debug && now as isize != self.seen {
             self.seen = now as isize;
             let pid = process_of(now);
-            let target = self.is_target(pid);
+            let target = self.is_target_window(now);
             eprintln!("guard: front pid={pid} target={target} tick={}", tick());
         }
         if now.is_null() || now as isize == self.person {
             return;
         }
-        if !self.is_target(process_of(now)) {
+        if !self.is_target_window(now) {
             // The person moved to another window: their taskbar click was for
             // it. The taskbar itself comes forward for an instant on the way.
             if !crate::actions::behind::is_taskbar(now) {
@@ -270,16 +325,20 @@ impl Guard {
     }
 
     /// A guard for a program that was just started: Windows lets it take the
-    /// foreground when the person has just typed or clicked.
-    pub(crate) fn for_launch(pid: u32, executable: &std::path::Path) -> Option<Self> {
+    /// foreground when the person has just typed or clicked. `start` is what
+    /// was on screen before the launch.
+    fn for_launch(pid: u32, executable: &std::path::Path, start: &LaunchStart) -> Option<Self> {
         let image = Some(executable.to_string_lossy().to_lowercase());
-        Self::start(
+        Self::start_from(
             Target {
                 pid,
                 image,
                 to_back: Some(false),
+                new_windows: Some(start.windows.clone()),
             },
             LAUNCH_SETTLE,
+            start.person as HWND,
+            None,
         )
     }
 
@@ -290,6 +349,7 @@ impl Guard {
                 pid,
                 image: None,
                 to_back: Some(true),
+                new_windows: None,
             },
             LAUNCH_SETTLE,
         )
@@ -325,6 +385,7 @@ pub(crate) fn guarded_program<T>(target_pid: Option<u32>, action: impl FnOnce() 
                 pid,
                 image: image_of(pid),
                 to_back: None,
+                new_windows: None,
             },
             ACTION_SETTLE,
         )
@@ -369,6 +430,7 @@ pub(crate) fn during_input(
                     pid,
                     image: image_of(pid),
                     to_back: None,
+                    new_windows: None,
                 },
                 Duration::from_millis(settle_ms),
                 person.0 as HWND,
@@ -451,6 +513,12 @@ fn watch(
         eprintln!("guard: start tick={} target={}", tick(), target.pid);
     }
     let to_back = target.to_back;
+    // A launch made on the work desktop is watched on the person's: what it
+    // shows there (a packaged app opens on the desktop on screen) is what
+    // could take their foreground.
+    let desktop = (target.new_windows.is_some() && crate::system::work_desktop::active())
+        .then(input_desktop::enter)
+        .flatten();
     WATCH.with(|slot| {
         *slot.borrow_mut() = Some(Watch {
             target,
@@ -464,6 +532,8 @@ fn watch(
             behind: to_back.map(crate::actions::behind::Behind::new),
             debug,
             hold,
+            person_acted: false,
+            hosts: Vec::new(),
         });
     });
     let mut message: MSG = unsafe { std::mem::zeroed() };
@@ -506,6 +576,7 @@ fn watch(
         unsafe { UnhookWindowsHookEx(hook) };
     }
     WATCH.with(|slot| *slot.borrow_mut() = None);
+    drop(desktop);
     if debug {
         eprintln!("guard: end tick={}", tick());
     }
@@ -521,6 +592,7 @@ unsafe extern "system" fn before_key(code: i32, wparam: usize, lparam: isize) ->
             WATCH.with(|slot| {
                 if let Ok(mut slot) = slot.try_borrow_mut() {
                     if let Some(watch) = slot.as_mut() {
+                        watch.person_acted = true;
                         watch.observe_person();
                         watch.keep_person_in_front();
                     }
@@ -536,18 +608,135 @@ pub(crate) fn person_front() -> isize {
     front() as isize
 }
 
-/// After a launch upstream made: when a window of the launched process took
-/// the foreground from the person's window, it is given back, and a guard
-/// keeps it so while the app settles (upstream starts the app activated; the
-/// old fork started it with SW_SHOWNOACTIVATE instead).
-pub(crate) fn after_launch(person: isize, pid: u32, executable: &std::path::Path) {
-    let person = person as HWND;
-    let now = front();
-    if !person.is_null() && now != person && process_of(now) == pid {
-        crate::actions::behind::give_back(person, now);
+/// What was on the person's screen before a launch: the window in front and
+/// every top-level window open, for `after_launch`.
+pub(crate) struct LaunchStart {
+    person: isize,
+    windows: Vec<isize>,
+}
+
+/// Takes what is on the person's screen before a launch (on the desktop on
+/// screen, also when this command runs on the work desktop).
+pub(crate) fn launch_start() -> LaunchStart {
+    input_desktop::run(|| LaunchStart {
+        person: front() as isize,
+        windows: top_windows(),
+    })
+}
+
+/// How long a launch that showed no window yet is watched for one: a packaged
+/// app is started by the system and shows its window seconds later.
+const LAUNCH_WAIT: Duration = Duration::from_secs(10);
+
+/// After a launch: when a window of the launched program, or one that was not
+/// open before it, took the foreground from the person's window, it is given
+/// back, and a guard keeps it so while the app settles (upstream starts the
+/// app activated; the old fork started it with SW_SHOWNOACTIVATE instead).
+/// `shown`: whether the launch already found the program's window; when it did
+/// not (the program handed the start over to another process), the guard waits
+/// for a new window to show, up to `LAUNCH_WAIT`.
+pub(crate) fn after_launch(
+    start: LaunchStart,
+    pid: u32,
+    executable: &std::path::Path,
+    shown: bool,
+) {
+    input_desktop::run(|| {
+        let person = start.person as HWND;
+        let now = front();
+        if !person.is_null()
+            && now != person
+            && (process_of(now) == pid || !start.windows.contains(&(now as isize)))
+        {
+            crate::actions::behind::give_back(person, now);
+        }
+    });
+    let Some(guard) = Guard::for_launch(pid, executable, &start) else {
+        return;
+    };
+    if !shown {
+        let end = Instant::now() + LAUNCH_WAIT;
+        while Instant::now() < end
+            && input_desktop::run(|| {
+                top_windows()
+                    .iter()
+                    .all(|window| start.windows.contains(window))
+            })
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
-    if let Some(guard) = Guard::for_launch(pid, executable) {
-        guard.finish();
+    guard.finish();
+}
+
+/// The visible top-level windows of the calling thread's desktop.
+fn top_windows() -> Vec<isize> {
+    unsafe extern "system" fn collect(window: HWND, data: isize) -> i32 {
+        let found = unsafe { &mut *(data as *mut Vec<isize>) };
+        if unsafe { IsWindowVisible(window) } != 0 {
+            found.push(window as isize);
+        }
+        1
+    }
+    let mut found: Vec<isize> = Vec::new();
+    unsafe { EnumWindows(Some(collect), &mut found as *mut _ as isize) };
+    found
+}
+
+/// The desktop on screen, for a command running on the work desktop.
+mod input_desktop {
+    use windows_sys::Win32::System::StationsAndDesktops::{
+        CloseDesktop, DESKTOP_ENUMERATE, DESKTOP_HOOKCONTROL, DESKTOP_READOBJECTS,
+        DESKTOP_WRITEOBJECTS, GetThreadDesktop, HDESK, OpenInputDesktop, SetThreadDesktop,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+
+    /// Puts the calling thread on the desktop on screen until dropped. The
+    /// thread must have no window and no hook yet.
+    pub(super) struct Entered {
+        input: HDESK,
+        previous: HDESK,
+    }
+
+    pub(super) fn enter() -> Option<Entered> {
+        let access =
+            DESKTOP_READOBJECTS | DESKTOP_ENUMERATE | DESKTOP_HOOKCONTROL | DESKTOP_WRITEOBJECTS;
+        let input = unsafe { OpenInputDesktop(0, 0, access) };
+        if input.is_null() {
+            return None;
+        }
+        let previous = unsafe { GetThreadDesktop(GetCurrentThreadId()) };
+        if unsafe { SetThreadDesktop(input) } == 0 {
+            unsafe { CloseDesktop(input) };
+            return None;
+        }
+        Some(Entered { input, previous })
+    }
+
+    impl Drop for Entered {
+        fn drop(&mut self) {
+            unsafe {
+                SetThreadDesktop(self.previous);
+                CloseDesktop(self.input);
+            }
+        }
+    }
+
+    /// Runs `f` on the desktop on screen: here when this command runs there,
+    /// else on a thread of its own put there.
+    pub(super) fn run<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+        if !crate::system::work_desktop::active() {
+            return f();
+        }
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let _entered = enter();
+                    f()
+                })
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+        })
     }
 }
 

@@ -181,7 +181,7 @@ mod imp {
                 if let Action::TypeText(text) = &request.action
                     && let Some(result) = crate::actions::posted_keys::type_text(&element, text)
                 {
-                    return Ok(result);
+                    return result;
                 }
             }
             let outcome = original(handle, request, lease);
@@ -302,6 +302,22 @@ mod imp {
             }
             other => other,
         };
+        // A toggle button or switch whose invoke action does nothing (WinUI:
+        // Paint's tools) changes through its toggle pattern: when the click above
+        // left it as it was, it is toggled, and the new state is checked.
+        if let Some(before) = control
+            && !before.changed(element, std::time::Duration::from_millis(600))
+            && let Ok(toggle) = element
+                .0
+                .get_pattern::<uiautomation::patterns::UITogglePattern>()
+            && toggle.toggle().is_ok()
+            && before.changed(element, std::time::Duration::from_millis(1000))
+        {
+            let step = agent_desktop_core::ActionStep::succeeded("TogglePattern.Toggle")
+                .with_mechanism(agent_desktop_core::StepMechanism::SemanticApi)
+                .with_verified(true);
+            return done(step);
+        }
         // A checkbox or radio button of a component library (PrimeNG, Material)
         // whose real input is hidden: its state changes only on the click of
         // the box around it. When the click above left it as it was, the box
@@ -339,7 +355,11 @@ mod imp {
                 ControlType::CheckBox => Some(Self::Check(
                     read_one(element, TreeProperty::ToggleState).number(),
                 )),
-                _ => None,
+                // Any other control with a toggle state (a WinUI toggle button or
+                // switch: Paint's tools): a click must change it too.
+                _ => read_one(element, TreeProperty::ToggleState)
+                    .number()
+                    .map(|state| Self::Check(Some(state))),
             }
         }
 

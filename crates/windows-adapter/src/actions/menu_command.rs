@@ -401,8 +401,11 @@ pub(crate) fn run_button_shortcut(
     let button = buttons.into_iter().find(|b| {
         b.get_accelerator_key()
             .is_ok_and(|keys| same_keys(&keys, &wanted))
-            || b.get_name()
-                .is_ok_and(|name| shown_keys(&name).is_some_and(|keys| same_keys(keys, &wanted)))
+            || b.get_name().is_ok_and(|name| {
+                shown_keys(&name)
+                    .iter()
+                    .any(|keys| same_keys(keys, &wanted))
+            })
     })?;
     button
         .get_pattern::<UIInvokePattern>()
@@ -418,12 +421,21 @@ pub(crate) fn run_button_shortcut(
     ))
 }
 
-/// The keys a name shows at its end, in parentheses: "Save (Ctrl+S)" gives
-/// "Ctrl+S". `None` when the name ends with no such keys.
-fn shown_keys(name: &str) -> Option<&str> {
-    let inner = name.trim_end().strip_suffix(')')?;
-    let keys = &inner[inner.rfind('(')? + 1..];
-    keys.contains('+').then_some(keys.trim())
+/// The shortcuts a name shows at its end, in parentheses: "Save (Ctrl+S)" gives
+/// ["Ctrl+S"], "Save (Ctrl+S, Alt+2)" gives ["Ctrl+S", "Alt+2"]. Empty when the
+/// name ends with no such keys.
+fn shown_keys(name: &str) -> Vec<&str> {
+    let Some(inner) = name.trim_end().strip_suffix(')') else {
+        return Vec::new();
+    };
+    let Some(open) = inner.rfind('(') else {
+        return Vec::new();
+    };
+    inner[open + 1..]
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|keys| keys.contains('+'))
+        .collect()
 }
 
 #[cfg(test)]
@@ -432,12 +444,13 @@ mod tests {
 
     #[test]
     fn a_button_s_keys_are_read_from_its_name_in_any_language() {
-        assert_eq!(shown_keys("Save (Ctrl+S)"), Some("Ctrl+S"));
-        assert_eq!(shown_keys("Guardar (Ctrl+G)"), Some("Ctrl+G"));
-        assert_eq!(shown_keys("保存 (Ctrl+S)"), Some("Ctrl+S"));
-        assert_eq!(shown_keys("Bold"), None);
-        assert_eq!(shown_keys("Notes (draft)"), None);
-        assert!(same_keys(shown_keys("Guardar (Ctrl+G)").unwrap(), "ctrl+g"));
+        assert_eq!(shown_keys("Save (Ctrl+S)"), ["Ctrl+S"]);
+        assert_eq!(shown_keys("Guardar (Ctrl+G)"), ["Ctrl+G"]);
+        assert_eq!(shown_keys("保存 (Ctrl+S)"), ["Ctrl+S"]);
+        assert_eq!(shown_keys("Save (Ctrl+S, Alt+2)"), ["Ctrl+S", "Alt+2"]);
+        assert!(shown_keys("Bold").is_empty());
+        assert!(shown_keys("Notes (draft)").is_empty());
+        assert!(same_keys(shown_keys("Guardar (Ctrl+G)")[0], "ctrl+g"));
     }
 
     #[test]

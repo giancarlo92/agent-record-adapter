@@ -50,6 +50,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 const LABEL: &str = "PostMessage.Key";
+/// How much of a document's text is read to see that typed text arrived.
+const DOCUMENT_TEXT_READ: i32 = 200_000;
 
 /// After Space went to a page's focused radio button or checkbox: verified
 /// when its state changed; else the control is clicked at its visible box (a
@@ -226,6 +228,20 @@ fn combo_messages(vk: u16, character: Option<u16>, h: Held) -> Vec<(u32, usize, 
 /// Holds `h`'s modifiers down in `thread`'s key state while `deliver` runs and
 /// the thread handles the messages, then puts those modifiers back as they
 /// were (see `put_back`).
+/// Whether `thread`'s input state can be shared with ours, so a modifier put in
+/// it is seen by the app (an app in a sandbox refuses it).
+fn can_share_input(thread: u32) -> bool {
+    let me = unsafe { GetCurrentThreadId() };
+    if thread == 0 || thread == me {
+        return thread != 0;
+    }
+    let attached = unsafe { AttachThreadInput(me, thread, 1) } != 0;
+    if attached {
+        unsafe { AttachThreadInput(me, thread, 0) };
+    }
+    attached
+}
+
 fn with_modifiers<T>(thread: u32, h: Held, deliver: impl FnOnce() -> T) -> T {
     if !h.any() || thread == 0 {
         return deliver();
@@ -325,6 +341,121 @@ fn handled(top: HWND, target: HWND) {
     }
 }
 
+/// Whether `top` is not the window the person is using: a window they use
+/// has the focus already, and is never told anything here.
+fn is_behind(top: HWND) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    unsafe {
+        let front = GetForegroundWindow();
+        front.is_null() || GetAncestor(front, GA_ROOT) != top
+    }
+}
+
+fn tell(window: HWND, message: u32, wparam: usize, lparam: isize) {
+    let mut answer = 0usize;
+    unsafe {
+        SendMessageTimeoutW(
+            window,
+            message,
+            wparam,
+            lparam,
+            SMTO_ABORTIFHUNG,
+            1_000,
+            &mut answer,
+        );
+    }
+}
+
+/// Tells a window behind it is active and focused, with the messages Windows
+/// sends a window that comes to the front, in their order: active
+/// (`WM_NCACTIVATE`, its title bar left unpainted with -1, so nothing changes
+/// on the screen), activated, focused. Some frameworks (winit) take keys only
+/// while the window is both active and focused; a classic or WinForms window
+/// gives the focus back to the field that had it. Windows' own foreground and
+/// focus never move. Returns whether it told it anything.
+/// A wake that covers a whole command (focus a field, type, read, try again)
+/// leaves the inner ones nothing to do: only the outermost one rests the window.
+fn wake(top: HWND, target: HWND) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        WA_ACTIVE, WM_ACTIVATE, WM_NCACTIVATE, WM_SETFOCUS,
+    };
+    if AWAKE.with(std::cell::Cell::get) || !is_behind(top) {
+        return false;
+    }
+    tell(top, WM_NCACTIVATE, 1, -1);
+    tell(top, WM_ACTIVATE, WA_ACTIVE as usize, 0);
+    tell(target, WM_SETFOCUS, 0, 0);
+    AWAKE.with(|awake| awake.set(true));
+    true
+}
+
+/// Tells a window this thread keeps awake that it is active and focused once
+/// more: an accessibility focus request may have brought it forward for a
+/// moment, and the guard that gives the person their window back deactivated
+/// it again (a WinUI field then dropped the keys).
+fn wake_again(top: HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        WA_ACTIVE, WM_ACTIVATE, WM_NCACTIVATE, WM_SETFOCUS,
+    };
+    if AWAKE.with(std::cell::Cell::get) && is_behind(top) {
+        tell(top, WM_NCACTIVATE, 1, -1);
+        tell(top, WM_ACTIVATE, WA_ACTIVE as usize, 0);
+        tell(top, WM_SETFOCUS, 0, 0);
+    }
+}
+
+thread_local! {
+    /// Whether a window is being kept awake by this thread now.
+    static AWAKE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The control typed text goes into, while `type_text` aims at one by its
+    /// own window (see `key_target`).
+    static INTO: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+}
+
+/// Where typed keys go in `top`: the control `type_text` aims at, else the
+/// window of `top` that holds its thread's keyboard focus.
+fn key_target(top: HWND) -> HWND {
+    let into = INTO.with(std::cell::Cell::get);
+    if into != 0 {
+        into as HWND
+    } else {
+        focused_in(top)
+    }
+}
+
+/// Runs `deliver` with typed keys going into `into` (see `key_target`).
+fn typing_into<T>(into: Option<HWND>, deliver: impl FnOnce() -> T) -> T {
+    let Some(into) = into else {
+        return deliver();
+    };
+    INTO.with(|cell| cell.set(into as isize));
+    let out = deliver();
+    INTO.with(|cell| cell.set(0));
+    out
+}
+
+/// Tells a window [`wake`] woke that it is inactive again, as it was. Its
+/// focus stays where it is within its own thread, as a window keeps it when
+/// another one comes to the front: told it lost it, an app may forget its
+/// focused field (WPF does), and the next key would find none.
+fn rest(top: HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WA_INACTIVE, WM_ACTIVATE, WM_NCACTIVATE};
+    tell(top, WM_ACTIVATE, WA_INACTIVE as usize, 0);
+    tell(top, WM_NCACTIVATE, 0, -1);
+    AWAKE.with(|awake| awake.set(false));
+}
+
+/// Runs `deliver` while a window behind believes it is active and focused
+/// ([`wake`]), then makes it inactive again ([`rest`]).
+fn with_focus<T>(top: HWND, target: HWND, deliver: impl FnOnce() -> T) -> T {
+    let woke = wake(top, target);
+    let out = deliver();
+    if woke {
+        rest(top);
+    }
+    out
+}
+
 fn is_extended(vk: u16) -> bool {
     matches!(
         vk,
@@ -347,7 +478,45 @@ fn focused_in(top: HWND) -> HWND {
             return info.hwndFocus;
         }
     }
-    top
+    // A frame of one process that hosts another's window (a packaged UWP app in
+    // ApplicationFrameHost): the keys are the hosted app's, read on its thread
+    // (with Shift in its key state), so they go to its window.
+    hosted_window(top).unwrap_or(top)
+}
+
+/// The first visible child window of `top` that another process owns.
+fn hosted_window(top: HWND) -> Option<HWND> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumChildWindows, IsWindowVisible};
+    unsafe extern "system" fn find(child: HWND, data: isize) -> i32 {
+        let found = unsafe { &mut *(data as *mut (u32, HWND)) };
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(child, &mut pid) };
+        if pid != 0 && pid != found.0 && unsafe { IsWindowVisible(child) } != 0 {
+            found.1 = child;
+            return 0;
+        }
+        1
+    }
+    let mut own = 0u32;
+    unsafe { GetWindowThreadProcessId(top, &mut own) };
+    let mut found: (u32, HWND) = (own, std::ptr::null_mut());
+    unsafe { EnumChildWindows(top, Some(find), &mut found as *mut _ as isize) };
+    if found.1.is_null() {
+        return None;
+    }
+    // Its thread's focus, when it is inside the hosted window.
+    unsafe {
+        let thread = GetWindowThreadProcessId(found.1, std::ptr::null_mut());
+        let mut info: GUITHREADINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+        if GetGUIThreadInfo(thread, &mut info) != 0
+            && !info.hwndFocus.is_null()
+            && GetAncestor(info.hwndFocus, GA_ROOT) == top
+        {
+            return Some(info.hwndFocus);
+        }
+    }
+    Some(found.1)
 }
 
 fn window_handle(window: &WindowInfo) -> Option<HWND> {
@@ -450,12 +619,49 @@ fn press_posted(
         ));
     };
     ready(top);
+    // A window that lost the activation is told it is active first: it gives the
+    // focus back to its field, and that field gets the key.
+    let woke = wake(top, top);
+    if woke {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     let target = focused_in(top);
     let thread = unsafe { GetWindowThreadProcessId(target, std::ptr::null_mut()) };
     // The modifiers' releases go after the key state is back to the real one: an
     // app that reads the state with each key (winit: WordCraft) otherwise kept
     // Ctrl held after ctrl+b and took the next letters as shortcuts.
-    let mut messages = combo_messages(vk, character, mods);
+    // The key goes as a real one does: down and up, with no character of its
+    // own. The app's message loop makes the character from the key
+    // (`TranslateMessage`: winit, WPF, WinForms and classic apps all do), so a
+    // character posted too was typed twice.
+    // A symbol typed with Shift ("=" is Shift+0 on a Spanish keyboard) whose app's
+    // key state cannot take Shift (an app in a sandbox, as a packaged UWP app,
+    // refuses to share its input state) would arrive as the unshifted key ("0"):
+    // it goes as its character instead.
+    let implicit_shift = character_key(&combo.key).is_some_and(|(_, _, shift)| shift);
+    if let Some(unit) = character
+        && implicit_shift
+        && !mods.ctrl
+        && !mods.alt
+        && !can_share_input(thread)
+    {
+        let sent = unsafe { PostMessageW(target, WM_CHAR, unit as usize, 1) != 0 };
+        handled(top, target);
+        if woke {
+            rest(top);
+        }
+        if !sent {
+            return Err(AdapterError::new(
+                ErrorCode::ActionFailed,
+                "The window did not accept the key (WM_CHAR)",
+            ));
+        }
+        return Ok(ActionResult::from_execution(
+            &Action::PressKey(combo.clone()),
+            vec![step()],
+        ));
+    }
+    let mut messages = combo_messages(vk, None, mods);
     let releases = messages.split_off(messages.len() - mods.count());
     let post = |list: &[(u32, usize, isize)]| {
         list.iter().all(|(message, wparam, lparam)| unsafe {
@@ -473,6 +679,9 @@ fn press_posted(
         handled(top, target);
         sent
     });
+    if woke {
+        rest(top);
+    }
     if !posted {
         return Err(AdapterError::new(
             ErrorCode::ActionFailed,
@@ -494,10 +703,12 @@ fn press_posted(
 /// window that holds the keyboard focus inside the element's top window (a
 /// Chromium window is told it is active for that moment). `None` when the
 /// window cannot be found: the original code runs.
+/// `None` when the window cannot be found (the original code runs), an error
+/// when the field showed none of the text.
 pub(crate) fn type_text(
     element: &crate::tree::element::UIAElement,
     text: &str,
-) -> Option<ActionResult> {
+) -> Option<Result<ActionResult, AdapterError>> {
     let client = crate::tree::automation::automation_client().ok()?;
     let top = crate::actions::chromium_input::top_window(&element.0, &client)?;
     let mut messages = Vec::new();
@@ -523,21 +734,65 @@ pub(crate) fn type_text(
     let delivered = if crate::actions::chromium_input::is_chromium_hwnd(top) {
         crate::actions::chromium_input::send_keys(top, &messages)
     } else {
-        type_keys(top, text)
+        // The field's text, read back to measure how this app takes characters.
+        let read = || {
+            element
+                .0
+                .get_pattern::<uiautomation::patterns::UIValuePattern>()
+                .ok()
+                .and_then(|pattern| pattern.get_value().ok())
+        };
+        // A field without the keyboard focus gets it first, through accessibility,
+        // with its window told it is active (an app may ignore a focus request
+        // while it believes it is inactive): the keys go where its caret is.
+        let woke = wake(top, top);
+        if !element.0.has_keyboard_focus().unwrap_or(false) {
+            let _ = element.0.set_focus();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            wake_again(top);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        // A control with a window of its own (a classic or WinForms field) that still
+        // does not hold its window's focus (a dialog that keeps it on another
+        // control, as Character Map on its grid) takes the keys posted to it.
+        let own = element
+            .0
+            .get_native_window_handle()
+            .ok()
+            .map(|handle| {
+                let hwnd: windows::Win32::Foundation::HWND = handle.into();
+                hwnd.0 as HWND
+            })
+            .filter(|own| {
+                !own.is_null()
+                    && unsafe { GetAncestor(*own, GA_ROOT) } == top
+                    && focused_in(top) != *own
+            });
+        let typed = typing_into(own, || type_keys(top, text, Some(&read)));
+        if woke {
+            rest(top);
+        }
+        typed
     };
     if !delivered {
-        return None;
+        return Some(Err(AdapterError::new(
+            ErrorCode::ActionFailed,
+            "The text did not reach the field: the app took none of its keys",
+        )
+        .with_suggestion(
+            "Click the field first, or type with the window in front (--headed)",
+        )));
     }
     // Typed text is the caller's to read back (the document's text, a snapshot).
     std::thread::sleep(std::time::Duration::from_millis(150));
-    Some(ActionResult::from_execution(
+    Some(Ok(ActionResult::from_execution(
         &Action::TypeText(text.to_owned()),
         vec![
             ActionStep::succeeded("PostMessage.Type")
                 .with_mechanism(StepMechanism::SemanticApi)
                 .with_verified(false),
         ],
-    ))
+    )))
 }
 
 /// Types `text` into a desktop app's window one key at a time, as a person's
@@ -549,9 +804,108 @@ pub(crate) fn type_text(
 /// the whole text: detaching it after each capital left WordCraft without the
 /// keyboard focus for the next keys. A character no key types (AltGr, an emoji)
 /// goes as the character alone.
-fn type_keys(top: HWND, text: &str) -> bool {
+///
+/// How a character goes depends on the app, which is measured, not guessed:
+/// most apps make the character from the key in their message loop
+/// (`TranslateMessage`), so a character posted with the key is typed twice;
+/// others (an editor whose input method does not translate posted keys) take
+/// the character only when it comes with the key. With a way to read the
+/// field (`read`), the first character goes with both: when it shows twice,
+/// one is erased with Backspace and the rest go as keys only; when once, the
+/// rest go with their characters; when not at all, nothing more is typed and
+/// it returns false. With no way to read it, keys go as real ones
+/// do, down and up only.
+fn type_keys(top: HWND, text: &str, read: Option<&dyn Fn() -> Option<String>>) -> bool {
     ready(top);
-    let target = focused_in(top);
+    with_focus(top, key_target(top), || {
+        let mut chars = text.chars();
+        let (Some(first), Some(read)) = (chars.next(), read) else {
+            return type_keys_now(top, text, false);
+        };
+        let Some(before) = read() else {
+            return type_keys_now(top, text, false);
+        };
+        let rest: String = chars.collect();
+        if !type_keys_now(top, &first.to_string(), true) {
+            return false;
+        }
+        // A busy app (just opened, still loading) handles the key late: the reading
+        // starts once it has taken its queue, or a late character would read as
+        // none arrived and the text would be typed again.
+        ready(top);
+        let count = |text: &str| text.chars().count();
+        let grown = |after: &Option<String>| {
+            after
+                .as_deref()
+                .map_or(0, |after| count(after) as i64 - count(&before) as i64)
+        };
+        // Read until the field shows the character (up to 1 s), then once more
+        // in case the app makes a second one a moment later.
+        let end = std::time::Instant::now() + std::time::Duration::from_millis(1_000);
+        let mut after = read();
+        while grown(&after) == 0 && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            after = read();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        match grown(&read()) {
+            // Nothing arrived: nothing more is typed, and the caller is told.
+            0 => false,
+            1 => type_keys_now(top, &rest, true),
+            _ => erase_one(top) && type_keys_now(top, &rest, false),
+        }
+    })
+}
+
+/// A click inside `element` (a document), as window messages: a move to the
+/// point first (a frame that never saw the pointer there drops the press), then
+/// the press and the release, near its lower right corner. The cursor does not
+/// move and the window is not activated. Returns whether it was posted.
+fn click_into(top: HWND, element: &uiautomation::UIElement) -> bool {
+    let Ok(bounds) = element.get_bounding_rectangle() else {
+        return false;
+    };
+    let (left, top_edge, right, bottom) = (
+        bounds.get_left(),
+        bounds.get_top(),
+        bounds.get_right(),
+        bounds.get_bottom(),
+    );
+    if right - left < 30 || bottom - top_edge < 30 {
+        return false;
+    }
+    let screen = windows_sys::Win32::Foundation::POINT {
+        x: right - 16,
+        y: bottom - 16,
+    };
+    let (target, point) = crate::actions::point_click::innermost(top as isize, screen);
+    let at = |x: i32, y: i32| (((y as u16) as usize) << 16 | (x as u16) as usize) as isize;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE};
+    let post = |message: u32, keys: usize, lparam: isize| unsafe {
+        PostMessageW(target as HWND, message, keys, lparam) != 0
+    };
+    let sent = post(WM_MOUSEMOVE, 0, at(point.x - 1, point.y))
+        && post(WM_MOUSEMOVE, 0, at(point.x, point.y))
+        && post(WM_LBUTTONDOWN, 0x0001, at(point.x, point.y))
+        && post(WM_LBUTTONUP, 0, at(point.x, point.y));
+    handled(top, target as HWND);
+    sent
+}
+
+/// One Backspace, as a real key: down and up.
+fn erase_one(top: HWND) -> bool {
+    let target = key_target(top);
+    let sent = combo_messages(VK_BACK, None, Held::default()).iter().all(
+        |(message, wparam, lparam)| unsafe {
+            PostMessageW(target, *message, *wparam, *lparam) != 0
+        },
+    );
+    handled(top, target);
+    sent
+}
+
+fn type_keys_now(top: HWND, text: &str, with_characters: bool) -> bool {
+    let target = key_target(top);
     let thread = unsafe { GetWindowThreadProcessId(target, std::ptr::null_mut()) };
     let post = |list: &[(u32, usize, isize)]| {
         list.iter().all(|(message, wparam, lparam)| unsafe {
@@ -581,7 +935,13 @@ fn type_keys(top: HWND, text: &str) -> bool {
                 '\n' => (VK_RETURN, Some(0x0D), false),
                 '\t' => (VK_TAB, Some(0x09), false),
                 _ => match scan(c) {
-                    Some(scanned) if (scanned >> 8) & 0b110 == 0 => {
+                    // A key that needs Shift goes as a key only when Shift could be put
+                    // in the app's key state; else it would type another character
+                    // ("=" is Shift+0 on a Spanish keyboard, and came out as "0"), and
+                    // the character goes alone.
+                    Some(scanned)
+                        if (scanned >> 8) & 0b110 == 0 && ((scanned >> 8) & 1 == 0 || have) =>
+                    {
                         let mut units = [0u16; 2];
                         let unit = c.encode_utf16(&mut units)[0];
                         ((scanned & 0xFF) as u16, Some(unit), (scanned >> 8) & 1 != 0)
@@ -619,6 +979,9 @@ fn type_keys(top: HWND, text: &str) -> bool {
                 shift: shift && have,
                 ..Held::default()
             };
+            // With its character, or down and up only, as measured for this app
+            // (see `type_keys`).
+            let character = if with_characters { character } else { None };
             ok = post(&combo_messages(vk, character, held));
             handled(top, target);
             if !ok {
@@ -653,7 +1016,14 @@ pub(crate) fn type_in_window(window: &WindowInfo, text: &str) -> Result<(), Adap
     };
     let mut pid = 0u32;
     unsafe { GetWindowThreadProcessId(top, &mut pid) };
-    crate::actions::focus_guard::guarded_program((pid != 0).then_some(pid), || {
+    // The window is told it is active for the whole command: an app that ignores a
+    // focus request while it believes it is inactive (egui) takes the one given to
+    // its document below, and the keys after it.
+    let woke = wake(top, top);
+    if woke {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    let result = crate::actions::focus_guard::guarded_program((pid != 0).then_some(pid), || {
         let client = crate::tree::automation::automation_client()?;
         let root = client
             .element_from_handle(Handle::from(top as isize))
@@ -668,12 +1038,29 @@ pub(crate) fn type_in_window(window: &WindowInfo, text: &str) -> Result<(), Adap
             .create_property_condition(UIProperty::HasKeyboardFocus, Variant::from(true), None)
             .ok()
             .and_then(|c| root.find_first(TreeScope::Descendants, &c).ok());
-        let target = match focused {
-            // A field or a document that takes text and has the focus: typed where its
-            // caret is. Focusing a focused document again through UI Automation made
-            // WordCraft drop the keys that followed.
-            Some(element) if takes_text(&element) => element,
-            _ => {
+        // A window that is not active reports no keyboard focus through UI
+        // Automation, but Windows keeps the control that had it (its thread's
+        // focus), and that control gets the keys: a classic or WinForms field.
+        // A window that lost the activation has no focused control at all until it is
+        // told it is active again: then the app gives the focus back to its field.
+        let kept = || {
+            let mut held = focused_in(top);
+            if held == top && wake(top, top) {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                held = focused_in(top);
+                rest(top);
+            }
+            (held != top)
+                .then(|| client.element_from_handle(Handle::from(held as isize)).ok())
+                .flatten()
+                .filter(takes_text)
+        };
+        // A field or a document that takes text and has the focus: typed where its
+        // caret is. Focusing a focused document again through UI Automation made
+        // WordCraft drop the keys that followed.
+        let target = match focused.filter(takes_text).or_else(kept) {
+            Some(element) => element,
+            None => {
                 let document = client
                     .create_property_condition(
                         UIProperty::ControlType,
@@ -681,34 +1068,70 @@ pub(crate) fn type_in_window(window: &WindowInfo, text: &str) -> Result<(), Adap
                         None,
                     )
                     .ok()
-                    .and_then(|c| root.find_first(TreeScope::Descendants, &c).ok())
-                    .ok_or_else(|| {
-                        AdapterError::new(
-                            ErrorCode::ElementNotFound,
-                            "The window has no focused field and no document to type into",
-                        )
-                        .with_suggestion("Click the field first, or type into its ref")
-                    })?;
+                    .and_then(|c| root.find_first(TreeScope::Descendants, &c).ok());
+                // No field and no document in the accessibility tree: an app that
+                // shows none (Java Swing, a game, a canvas) still takes keys where its
+                // own focus is, as from a keyboard. The keys go there, unread.
+                let Some(document) = document else {
+                    return if type_keys(top, text, None) {
+                        Ok(())
+                    } else {
+                        Err(AdapterError::new(
+                            ErrorCode::ActionFailed,
+                            "The window did not take the keys",
+                        ))
+                    };
+                };
                 // Not focused (a button of the app had it, as after a click through
                 // accessibility): the page gets the focus, so its editor takes the keys.
                 let _ = document.set_focus();
                 std::thread::sleep(std::time::Duration::from_millis(150));
+                wake_again(top);
+                std::thread::sleep(std::time::Duration::from_millis(100));
                 document
             }
         };
+        // Its value and, for a document, its text: a web page's document (Chromium,
+        // Electron) gives its address as its value, and only its text shows what was
+        // typed into it.
         let read = |e: &uiautomation::UIElement| {
-            e.get_pattern::<uiautomation::patterns::UIValuePattern>()
+            let value = e
+                .get_pattern::<uiautomation::patterns::UIValuePattern>()
                 .ok()
-                .and_then(|p| p.get_value().ok())
+                .and_then(|p| p.get_value().ok());
+            let text = matches!(e.get_control_type(), Ok(ControlType::Document))
+                .then(|| {
+                    e.get_pattern::<uiautomation::patterns::UITextPattern>()
+                        .ok()
+                })
+                .flatten()
+                .and_then(|p| p.get_document_range().ok())
+                .and_then(|range| range.get_text(DOCUMENT_TEXT_READ).ok());
+            match (value, text) {
+                (None, None) => None,
+                (value, text) => Some(format!(
+                    "{}\u{0}{}",
+                    value.unwrap_or_default(),
+                    text.unwrap_or_default()
+                )),
+            }
         };
         let before = read(&target);
         // A document that reads its text back must show it changed: an app drawn on a
         // canvas may drop keys while its window is not active, and that is not success.
         // It is read once the app has handled the keys and painted, for up to 1.5 s.
         let typed = |into: &uiautomation::UIElement| -> Result<bool, AdapterError> {
-            type_text(&crate::tree::element::UIAElement::from(into.clone()), text).ok_or_else(
-                || AdapterError::new(ErrorCode::ActionFailed, "The window did not take the text"),
-            )?;
+            match type_text(&crate::tree::element::UIAElement::from(into.clone()), text) {
+                None => {
+                    return Err(AdapterError::new(
+                        ErrorCode::ActionFailed,
+                        "The window did not take the text",
+                    ));
+                }
+                // Nothing arrived, so nothing is typed twice: the next way is tried.
+                Some(Err(_)) => return Ok(false),
+                Some(Ok(_)) => {}
+            }
             handled(top, top);
             let end = std::time::Instant::now() + std::time::Duration::from_millis(1_500);
             let mut changed = before.is_none() || read(&target) != before;
@@ -719,6 +1142,13 @@ pub(crate) fn type_in_window(window: &WindowInfo, text: &str) -> Result<(), Adap
             Ok(changed)
         };
         let mut changed = typed(&target)?;
+        // A Chromium window (a browser, an Electron app) takes the keys through its
+        // own route (see `chromium_input`), which delivers them; its page may just
+        // not show its text to accessibility (VS Code's editor). Typing again, or a
+        // click into the page, would type twice or land on whatever is there.
+        if !changed && crate::actions::chromium_input::is_chromium_hwnd(top) {
+            return Ok(());
+        }
         // Nothing arrived (so nothing is typed twice): the page's own editor did not
         // have the keyboard although accessibility said its document did (WordCraft
         // after a click on one of its buttons). The document gets the focus through
@@ -726,7 +1156,17 @@ pub(crate) fn type_in_window(window: &WindowInfo, text: &str) -> Result<(), Adap
         if !changed && matches!(target.get_control_type(), Ok(ControlType::Document)) {
             let _ = target.set_focus();
             std::thread::sleep(std::time::Duration::from_millis(150));
+            wake_again(top);
+            std::thread::sleep(std::time::Duration::from_millis(100));
             changed = typed(&target)?;
+            // Still nothing: its editor never had the focus (opened while the window was
+            // behind) and takes none through accessibility (egui). A person clicks inside
+            // the page: so does this, in the background, near its lower right corner,
+            // which puts the caret at the end of the text.
+            if !changed && click_into(top, &target) {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                changed = typed(&target)?;
+            }
         }
         if !changed {
             return Err(AdapterError::new(
@@ -737,7 +1177,11 @@ pub(crate) fn type_in_window(window: &WindowInfo, text: &str) -> Result<(), Adap
             .with_disposition(agent_desktop_core::DeliverySemantics::delivered_unverified()));
         }
         Ok(())
-    })
+    });
+    if woke {
+        rest(top);
+    }
+    result
 }
 
 /// The messages a real key sends: down, the character it types (if any), up.

@@ -71,7 +71,12 @@ impl WindowsAdapter {
         policy: InteractionPolicy,
         lease: &InteractionLease,
     ) -> Result<ActionResult, AdapterError> {
-        let result = (|| {
+        // A key may open a window of its own (Ctrl+S, the Save dialog), which
+        // comes forward: the whole press is guarded, and the person's window is
+        // given back (see `focus_guard::guarded_program`).
+        let guarded = !policy.is_headed() && background::enabled();
+        let pid = guarded.then(|| window.pid.get());
+        let result = crate::actions::focus_guard::guarded_program(pid, || {
             if !policy.is_headed() && background::enabled() {
                 if let Some(result) =
                     crate::actions::menu_command::run_shortcut(window, combo, lease.deadline())
@@ -92,7 +97,7 @@ impl WindowsAdapter {
             }
             self.inner
                 .press_key_for_window(window, combo, policy, lease)
-        })();
+        });
         if result.is_ok() {
             crate::input::record::record_agent::note_window_key(window, combo);
         }
@@ -135,9 +140,14 @@ impl WindowsAdapter {
         let separate = crate::system::separate_launch::has_own_profile(&options.args)
             || crate::system::work_desktop::active();
         if separate && exe.is_absolute() && exe.is_file() {
-            let person = crate::actions::focus_guard::person_front();
+            let start = crate::actions::focus_guard::launch_start();
             let result = crate::system::separate_launch::launch(id, options, &self.inner)?;
-            crate::actions::focus_guard::after_launch(person, u32::from(result.pid), exe);
+            crate::actions::focus_guard::after_launch(
+                start,
+                u32::from(result.pid),
+                exe,
+                result.window.is_some(),
+            );
             return Ok(result);
         }
         // Every Chromium browser started here keeps its pages working while
@@ -156,12 +166,13 @@ impl WindowsAdapter {
         options: &core::system::launch_options::LaunchOptions,
         lease: &InteractionLease,
     ) -> Result<core::system::launch_result::LaunchResult, AdapterError> {
-        let person = crate::actions::focus_guard::person_front();
+        let start = crate::actions::focus_guard::launch_start();
         let result = self.inner.launch_app(id, options, lease)?;
         crate::actions::focus_guard::after_launch(
-            person,
+            start,
             u32::from(result.pid),
             std::path::Path::new(id),
+            result.window.is_some(),
         );
         Ok(result)
     }
@@ -240,6 +251,49 @@ impl WindowsAdapter {
         Ok(live)
     }
 
+    /// A packaged (UWP) app's window is listed under the app that shows it
+    /// (CalculatorApp.exe), while the app list has only the process that hosts
+    /// its frame (ApplicationFrameHost.exe): every command that resolves a
+    /// window's app (press --window-id) found none. An exact query for an app
+    /// the list has not, which owns listed windows, gets it from them.
+    pub(crate) fn ours_query_app_inventory(
+        &self,
+        query: core::AppInventoryQuery<'_>,
+        deadline: Deadline,
+    ) -> Result<core::AppInventory, AdapterError> {
+        let mut inventory = self.inner.query_app_inventory(query, deadline)?;
+        if let core::AppInventoryQuery::Exact {
+            name,
+            bundle_id: None,
+        } = query
+            && background::enabled()
+            && inventory.apps.is_empty()
+            && inventory.skipped.is_empty()
+        {
+            let filter = WindowFilter {
+                focused_only: false,
+                app: Some(name.to_owned()),
+            };
+            for window in self
+                .inner
+                .list_windows(&filter, deadline)
+                .unwrap_or_default()
+            {
+                let known = inventory.apps.iter().any(|app| app.pid == window.pid);
+                if window.app == name && !known && window.process_instance.is_some() {
+                    inventory.apps.push(AppInfo {
+                        name: window.app.clone(),
+                        pid: window.pid,
+                        bundle_id: None,
+                        process_instance: window.process_instance.clone(),
+                        presentation: None,
+                    });
+                }
+            }
+        }
+        Ok(inventory)
+    }
+
     /// A work desktop with no window yet is an empty list (Windows reports
     /// enumerating an empty desktop as a failure).
     pub(crate) fn ours_list_windows(
@@ -296,6 +350,20 @@ fn background_evidence(handle: &NativeHandle, live: &mut LiveElement) {
         .any(|a| a == capability::SET_VALUE)
     {
         add(&mut live.available_actions, capability::SELECT);
+    }
+    // A text field or a document that takes the focus is typed into where its
+    // caret is (writing its value would replace it): background mode focuses it
+    // through accessibility, with its window told it is active, and types the
+    // text as keys (`posted_keys::type_text`), in any app, also one that draws
+    // the field itself (egui, DeckCraft's notes): it offers `TypeText`.
+    if has_bounds
+        && matches!(role.as_str(), "textfield" | "document")
+        && live
+            .available_actions
+            .iter()
+            .any(|a| a == capability::SET_FOCUS)
+    {
+        add(&mut live.available_actions, capability::TYPE_TEXT);
     }
     if has_bounds
         && matches!(role.as_str(), "tab" | "radiobutton" | "checkbox")

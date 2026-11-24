@@ -113,7 +113,33 @@ Nothing compares the words of an app's or a browser's interface, so every route 
 - A shortcut a menu or a button shows ("Strg+S", "Mayús+Ctrl+S", "Save (Ctrl+S)"): each key known by the names Windows gives it in every keyboard layout installed (`GetKeyNameTextW`, `actions/key_names.rs`) and the English ones. A button is found by the keys its accelerator or its name shows, never by the words of its name.
 - Which recorded click asks before it runs: the last click on a button by default, by its place and role, and whatever the person marks in the app (`ask-before.json`).
 
-Limit: an app that exposes a button only by its name (WordCraft's Bold, Italic and Underline: no id, no accelerator, no keys in the name) has no language-free route from Ctrl+B to that button; the keys are pressed instead, which WordCraft takes only while its window is active. An agent can click the button by its ref in any language.
+## Keys and text in a window behind
+
+A key or typed text goes to a window behind as the messages a real key sends, never through the person's keyboard (`actions/posted_keys.rs`):
+
+- The window is first told it is active and focused, with the messages Windows sends a window that comes to the front (`WM_NCACTIVATE` with -1 so its title bar is not repainted, `WM_ACTIVATE`, `WM_SETFOCUS`), and told it is inactive again afterwards (not that it lost the focus: WPF then forgets its focused field). Frameworks that take keys only while active and focused (winit, so WordCraft) take them; a WinForms or classic window gives the focus back to its field. A window the person is using is never told anything, and Windows' foreground never moves.
+- A key goes as a real one does, down and up: the app's own message loop makes the character (`TranslateMessage`; winit, WPF, WinForms and classic apps all do). Typed text into a field that can be read is measured on its first character (sent with its character too): typed twice, one is erased and the rest go as keys only; typed once (an editor whose input method does not translate posted keys), the rest go with their characters.
+- `type w-<id>` in a window that lost the activation finds the field Windows kept for it (its thread's focus), as UI Automation reports none there.
+- `type <ref>` into a text field or document that takes the focus (also one an app draws itself: egui, DeckCraft's notes) is offered to upstream's gate as `TypeText`: the field gets the focus through accessibility with its window awake, the window is woken again after it (the guard that gives the person their window back deactivated it, and a WinUI field then dropped the keys), and the text goes as keys. When the field shows none of it, the command fails instead of reporting success.
+- Every key (`press --window-id`) runs guarded: a key that opens a window of its own (Ctrl+S, a Save dialog) gives the person their window back.
+- A button's keys are read from its name even when it shows several ("Save (Ctrl+S, Alt+2)").
+- A click on a toggle button or switch that leaves its state unchanged (WinUI: Paint's tools ignore Invoke) toggles it through its toggle pattern, and the new state is checked.
+- `type <ref>` into a control with a window of its own (a classic or WinForms field) that does not hold its window's focus (a dialog that keeps it on another control: Character Map on its grid) posts the keys to that control's window.
+- A busy app (just opened) handles a key late: typed text is read for its first character only once the app has taken its queue (`WaitForInputIdle`), so a late character is not taken for none and typed again.
+- A window that hosts another process's window (a packaged UWP app: its frame belongs to ApplicationFrameHost, its content to the app) gets its keys on the hosted window, whose thread reads them (`focused_in` → `hosted_window`).
+- A symbol typed with Shift ("=" is Shift+0 on a Spanish keyboard) goes as a key only when Shift can be put in the app's key state; an app in a sandbox (packaged apps) refuses to share it, and the symbol goes as its character, never as the unshifted key ("0"). The same for `press` of such a symbol.
+- `type w-<id>` in a window whose accessibility tree has no field and no document (Java Swing, a game, a canvas) sends the text as keys where the app's own focus is; nothing can read it back.
+- In a Chromium window (a browser, an Electron app) the text goes through its own route (`chromium_input`); when the page does not show its text to accessibility (VS Code's editor), the text is reported sent, never typed again or followed by a click into the page. A document's text is read with its text pattern too: a web page's value is its address.
+- A launch is guarded on what it shows, not only on its process: a window that was not open before the launch counts as the launched program's (a packaged app is started by the system's broker; a single-instance app hands over to the running one) until the person clicks or presses a key. A launch that found no window yet is watched for one up to 10 s. On the work desktop it is watched on the desktop on screen: a packaged app without an app alias (Calculator) opens there, behind the person's windows, never on the work desktop.
+- The focus guard also counts a window that hosts one of the target's windows (a UWP frame) as the target's: a click on Calculator's buttons brought its frame forward.
+- `query_app_inventory` hook: the app list has only the UWP frame's host, while the window list names the app; an exact query for an app the window list names gets it from its windows, so `press --window-id` resolves a UWP window.
+
+Limits: a click or a stroke on Paint's canvas takes only real pointer input (`WM_POINTER`), so placing a text box or drawing there needs `--headed`. Java AWT (Swing) moves every mouse message to the window under the real cursor, so a `click-at` in a Swing window needs `--headed`; its buttons work by keyboard (Tab, Space). A packaged app's own shortcuts that it handles only while active (Calculator's Escape) do nothing behind; its digits and operators do. An app that builds its editor or a new window only while it is really active (WordCraft opened behind and never active: its document gets no focus by accessibility or by a background click, and a new window stays empty) needs the window in front once (`--headed`); once it has been active, it takes keys and text behind other windows.
+
+### Checking a change: one app per UI technology
+
+A change to these routes is checked on every Windows UI technology at once, never on one app: `tests/background/scripts/tech-suite.sh` runs, on the hidden work desktop and behind the person's windows, `tech-matrix-test.sh` (Win32 classic: Character Map; WinForms and WPF: test programs built by `apps/build-test-apps.ps1`; Java Swing, with no accessibility tree; Electron: VS Code with a test profile; UWP: Calculator), WordCraft and DeckCraft (winit/egui), Paint (WinUI 3), and the Chromium page tests. No decision in the code looks at an app's name: each one keys on how a technology behaves (a frame hosting another process, a field with its own window, a sandboxed key state, a page that hides its text).
+
 
 ## Recording details
 
@@ -123,6 +149,6 @@ Limit: an app that exposes a button only by its name (WordCraft's Bold, Italic a
 
 ## Results (24 Nov 2026)
 
-- Unit tests: core 40, Windows layer 43 (and 1 ignored), front 14, browser 35, recorder app 14, installer 19: all pass. Clippy and rustfmt clean on our crates and the app.
+- Unit tests: core 40, Windows layer 45 (and 1 ignored), front 14, browser 35, recorder app 14, installer 19: all pass. Clippy and rustfmt clean on our crates and the app.
 - Upstream's CLI unit tests in the engine: 224 pass with background on and off (3 path-dependent contract tests and the shell-surface tests that press real Win+A skipped).
 - Live, with the person's foreground unchanged throughout: see tests/background/README.md.

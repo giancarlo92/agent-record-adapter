@@ -57,7 +57,7 @@ impl core::ObservationOps for WindowsAdapter {
         query: core::AppInventoryQuery<'_>,
         deadline: Deadline,
     ) -> Result<core::AppInventory, AdapterError> {
-        self.inner.query_app_inventory(query, deadline)
+        self.ours_query_app_inventory(query, deadline)
     }
     fn get_tree(
         &self,

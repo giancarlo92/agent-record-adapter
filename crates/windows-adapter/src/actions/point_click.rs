@@ -101,7 +101,7 @@ fn frame(hwnd: isize) -> Option<RECT> {
 
 /// The innermost visible, enabled child window under `screen`, with the point
 /// in its client coordinates.
-fn innermost(top: isize, screen: POINT) -> (isize, POINT) {
+pub(crate) fn innermost(top: isize, screen: POINT) -> (isize, POINT) {
     let mut current = top;
     for _ in 0..MAX_DEPTH {
         let mut local = screen;
