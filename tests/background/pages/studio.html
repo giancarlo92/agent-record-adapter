@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!-- Part of Agent Record Adapter (see NOTICE). Ported from the desktop-recorder-mcp fork. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Northwind Studio · Channel content</title>
+<!-- Test page for code bots (version 5: a video upload wizard in stages, like the ones video sites use).
+     The same file is used for two channels: CHANNEL below is "A" here and "B" in v5-studio-b.html.
+     See testdata/forms/README.md for what changes between them. -->
+<style>
+  :root { font-family: system-ui, sans-serif; color: #1d2330; background: #f4f5f8; }
+  body { margin: 0; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e2e5eb; position: relative; }
+  .logo { font-weight: 700; font-size: 18px; } .spacer { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  #create { border: 1px solid #c8cfda; background: #fff; border-radius: 8px; padding: 6px 14px; font-weight: 600; }
+  #create-menu { position: absolute; right: 20px; top: 50px; background: #fff; border: 1px solid #dfe3ea; border-radius: 10px; box-shadow: 0 8px 24px #0002; padding: 6px 0; min-width: 190px; z-index: 5; }
+  [role=menuitem] { padding: 9px 16px; cursor: pointer; } [role=menuitem]:hover { background: #eef1f6; }
+  main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }
+  td, th { text-align: left; padding: 10px 14px; border-bottom: 1px solid #eceef2; font-size: 14px; }
+  .scrim { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 10; }
+  [role=dialog] { background: #fff; border-radius: 14px; width: min(860px, 94vw); max-height: 92vh; overflow: auto; box-shadow: 0 20px 60px #0004; }
+  .dialog-head { display: flex; align-items: center; padding: 14px 20px; border-bottom: 1px solid #eceef2; }
+  .dialog-head h2 { margin: 0; font-size: 18px; flex: 1; }
+  .icon { border: 0; background: none; font-size: 20px; }
+  #picker { padding: 60px 20px; text-align: center; color: #5b6475; }
+  .primary { background: #1f6feb; color: #fff; border: 0; border-radius: 8px; padding: 9px 20px; font-weight: 600; }
+  .primary:disabled { background: #b9c3d6; cursor: not-allowed; }
+  .ghost { background: none; border: 0; color: #1f6feb; font-weight: 600; padding: 9px 14px; }
+  .stepper { display: flex; justify-content: space-between; padding: 14px 40px; border-bottom: 1px solid #eceef2; }
+  .stepper button { border: 0; background: none; color: #6b7385; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 13px; }
+  .stepper button .dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #b9c3d6; }
+  .stepper button[aria-current=step] { color: #1d2330; font-weight: 600; }
+  .stepper button[aria-current=step] .dot, .stepper button.done .dot { background: #1f6feb; border-color: #1f6feb; }
+  section.stage { padding: 18px 28px; } section.stage h3 { margin: 0 0 12px; }
+  .box { border: 1px solid #c8cfda; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; }
+  .box label { display: block; font-size: 12px; color: #5b6475; margin-bottom: 4px; }
+  [contenteditable] { outline: none; min-height: 22px; white-space: pre-wrap; }
+  #description-textbox { min-height: 70px; }
+  .box[aria-invalid=true], fieldset[aria-invalid=true] { border-color: #d33; }
+  fieldset { border: 1px solid #dfe3ea; border-radius: 10px; padding: 10px 14px; margin: 0 0 14px; }
+  legend { font-weight: 600; padding: 0 6px; } .hint { font-size: 13px; color: #5b6475; margin: 2px 0 8px; }
+  nw-radio { display: flex; align-items: center; gap: 8px; padding: 5px 0; cursor: pointer; }
+  nw-radio::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #8792a6; }
+  nw-radio[aria-checked=true]::before { border-color: #1f6feb; background: radial-gradient(#1f6feb 45%, #fff 50%); }
+  .error { color: #c02626; font-size: 13px; margin: 4px 0 8px; } .error:empty { display: none; }
+  footer.wizard-foot { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid #eceef2; }
+  #progress { flex: 1; font-size: 13px; color: #5b6475; }
+  .check-row { display: flex; gap: 10px; align-items: center; font-size: 14px; padding: 6px 0; }
+  #published { padding: 24px 28px; } #published h2 { margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">Northwind Studio</span>
+  <span class="spacer"></span>
+  <button type="button" id="create" aria-label="Create" aria-haspopup="true">＋ Create</button>
+</header>
+<main>
+  <h1>Channel content</h1>
+  <table aria-label="Videos">
+    <thead><tr><th>Video</th><th>Visibility</th><th>Date</th></tr></thead>
+    <tbody id="videos"><tr><td>Welcome to the channel</td><td>Public</td><td>Mar 3</td></tr></tbody>
+  </table>
+</main>
+
+<script>
+const CHANNEL = 'A';
+// Channel B (the same site seen from another account, like the cases found on real video sites):
+// - "Create" opens a menu first; the upload dialog (and its file input) only exists after "Upload videos".
+// - Details has one more required question: altered or synthetic content.
+// - Saving needs a "Community Guidelines" confirmation next to the button; without it Save does nothing
+//   but show an error (the final public button refused by a missing required field).
+// - Processing takes longer.
+const B = CHANNEL === 'B';
+const UPLOAD_MS = 2000, PROCESS_MS = B ? 9000 : 7000;
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
+
+$('#create').addEventListener('click', () => {
+  if (!B) return openDialog();
+  let menu = $('#create-menu');
+  if (menu) return menu.remove();
+  menu = el(`<div id="create-menu" role="menu" aria-label="Create">
+      <div role="menuitem" tabindex="0" test-id="upload" id="upload-item">Upload videos</div>
+      <div role="menuitem" tabindex="0">Go live</div>
+      <div role="menuitem" tabindex="0">Create post</div>
+    </div>`);
+  document.querySelector('header').append(menu);
+  $('#upload-item').addEventListener('click', () => { menu.remove(); openDialog(); });
+});
+
+function openDialog() {
+  if ($('#upload-dialog')) return;
+  const scrim = el(`<div class="scrim" id="scrim">
+    <div role="dialog" id="upload-dialog" aria-label="Upload videos">
+      <div class="dialog-head"><h2>Upload videos</h2><button type="button" class="icon" id="close-dialog" aria-label="Close">✕</button></div>
+      <div id="picker">
+        <p>Drag and drop video files to upload</p>
+        <p class="hint">Your videos will be private until you publish them.</p>
+        <button type="button" class="primary" id="select-files">Select files</button>
+        <input type="file" name="Filedata" accept="video/*,.mp4,.mov" hidden>
+      </div>
+    </div></div>`);
+  document.body.append(scrim);
+  const input = $('input[type=file]', scrim);
+  $('#select-files').addEventListener('click', () => input.click());
+  $('#close-dialog').addEventListener('click', () => scrim.remove());
+  input.addEventListener('change', () => { if (input.files.length) startWizard(input.files[0]); });
+}
+
+const STAGES = ['details', 'elements', 'checks', 'visibility'];
+const LABELS = ['Details', 'Video elements', 'Checks', 'Visibility'];
+let stage = 0, processed = false;
+
+function startWizard(file) {
+  const dialog = $('#upload-dialog');
+  const name = file.name.replace(/\.[^.]+$/, '');
+  $('h2', dialog).textContent = name;
+  $('#picker').remove();
+  dialog.append(el(`<div id="wizard">
+    <nav class="stepper" aria-label="Upload steps">${LABELS.map((l, i) =>
+      `<button type="button" id="step-badge-${i}" data-stage="${i}"><span class="dot"></span>${l}</button>`).join('')}</nav>
+
+    <section class="stage" id="details" aria-label="Details">
+      <h3>Details</h3>
+      <div class="box" id="title-box"><label for="title-textbox">Title (required)</label>
+        <div id="title-textbox" contenteditable="true" role="textbox" aria-required="true"
+             aria-label="Add a title that describes your video">${name}</div></div>
+      <div class="error" id="title-error" role="alert"></div>
+      <div class="box"><label for="description-textbox">Description</label>
+        <div id="description-textbox" contenteditable="true" role="textbox" aria-multiline="true"
+             aria-label="Tell viewers about your video"></div></div>
+      <fieldset id="audience" role="radiogroup" aria-label="Audience" aria-required="true">
+        <legend>Audience</legend>
+        <p class="hint">Is this video made for kids? (required)</p>
+        <nw-radio role="radio" tabindex="0" name="VIDEO_MADE_FOR_KIDS_MFK" aria-checked="false">Yes, it's made for kids</nw-radio>
+        <nw-radio role="radio" tabindex="0" name="VIDEO_MADE_FOR_KIDS_NOT_MFK" aria-checked="false">No, it's not made for kids</nw-radio>
+      </fieldset>
+      <div class="error" id="audience-error" role="alert"></div>
+      ${B ? `<fieldset id="altered" role="radiogroup" aria-label="Altered content" aria-required="true">
+        <legend>Altered content</legend>
+        <p class="hint">Does this video contain realistic altered or synthetic content? (required)</p>
+        <nw-radio role="radio" tabindex="0" name="ALTERED_YES" aria-checked="false">Yes</nw-radio>
+        <nw-radio role="radio" tabindex="0" name="ALTERED_NO" aria-checked="false">No</nw-radio>
+      </fieldset>
+      <div class="error" id="altered-error" role="alert"></div>` : ''}
+    </section>
+
+    <section class="stage" id="elements" aria-label="Video elements" hidden>
+      <h3>Video elements</h3>
+      <p class="hint">Use cards and an end screen to show viewers related videos.</p>
+      <div class="check-row"><button type="button" class="ghost" id="add-subtitles">Add subtitles</button></div>
+      <div class="check-row"><button type="button" class="ghost" id="add-end-screen">Add an end screen</button></div>
+    </section>
+
+    <section class="stage" id="checks" aria-label="Checks" hidden>
+      <h3>Checks</h3>
+      <p class="hint">We'll check your video for issues that may restrict its visibility.</p>
+      <div class="check-row"><strong>Copyright</strong><span id="copyright-status">Checking…</span></div>
+    </section>
+
+    <section class="stage" id="visibility" aria-label="Visibility" hidden>
+      <h3>Visibility</h3>
+      <fieldset id="privacy" role="radiogroup" aria-label="Visibility">
+        <legend>Save or publish</legend>
+        <nw-radio role="radio" tabindex="0" name="PRIVATE" aria-checked="false">Private · only you can watch</nw-radio>
+        <nw-radio role="radio" tabindex="0" name="UNLISTED" aria-checked="false">Unlisted · anyone with the link</nw-radio>
+        <nw-radio role="radio" tabindex="0" name="PUBLIC" aria-checked="false">Public · everyone</nw-radio>
+      </fieldset>
+      <div class="error" id="privacy-error" role="alert"></div>
+      ${B ? `<div class="check-row"><input type="checkbox" id="guidelines">
+        <label for="guidelines">I confirm this video follows the Community Guidelines</label></div>
+      <div class="error" id="guidelines-error" role="alert"></div>` : ''}
+    </section>
+
+    <footer class="wizard-foot">
+      <span id="progress" aria-live="polite">Uploading 0%…</span>
+      <button type="button" class="ghost" id="back" hidden>Back</button>
+      <button type="button" class="primary" id="next">Next</button>
+      <button type="button" class="primary" id="save" hidden disabled>Save</button>
+    </footer>
+  </div>`));
+
+  for (const radio of dialog.querySelectorAll('nw-radio')) {
+    radio.addEventListener('click', () => {
+      for (const r of radio.closest('[role=radiogroup]').querySelectorAll('nw-radio')) r.setAttribute('aria-checked', r === radio ? 'true' : 'false');
+      radio.closest('[role=radiogroup]').removeAttribute('aria-invalid');
+      const err = radio.closest('[role=radiogroup]').nextElementSibling;
+      if (err && err.classList.contains('error')) err.textContent = '';
+      if (radio.closest('#privacy')) $('#save').textContent = radio.getAttribute('name') === 'PUBLIC' ? 'Publish' : 'Save';
+    });
+  }
+  if (B) $('#guidelines').addEventListener('change', () => { $('#guidelines-error').textContent = ''; });
+  for (const badge of dialog.querySelectorAll('.stepper button')) badge.addEventListener('click', () => go(+badge.dataset.stage));
+  $('#next').addEventListener('click', () => { if (stage === 0 && !detailsOK()) return; go(stage + 1); });
+  $('#back').addEventListener('click', () => go(stage - 1));
+  $('#save').addEventListener('click', save);
+  go(0);
+  simulateUpload();
+}
+
+const checked = (group) => { const r = $(`#${group} nw-radio[aria-checked=true]`); return r && r.getAttribute('name'); };
+
+// detailsOK: the page refuses Next (nothing happens but the errors) while a required answer is missing.
+function detailsOK() {
+  let ok = true;
+  const title = $('#title-textbox').textContent.trim();
+  $('#title-error').textContent = title ? '' : 'Your video needs a title';
+  $('#title-box').setAttribute('aria-invalid', title ? 'false' : 'true');
+  ok = ok && !!title;
+  const need = [['audience', 'Choose whether your video is made for kids']];
+  if (B) need.push(['altered', 'Tell viewers whether your video has altered or synthetic content']);
+  for (const [group, msg] of need) {
+    const answered = !!checked(group);
+    $(`#${group}-error`).textContent = answered ? '' : msg;
+    if (!answered) { $(`#${group}`).setAttribute('aria-invalid', 'true'); ok = false; }
+  }
+  return ok;
+}
+
+function go(n) {
+  if (n < 0 || n >= STAGES.length) return;
+  if (n > 0 && stage === 0 && !detailsOK()) return;
+  stage = n;
+  STAGES.forEach((id, i) => {
+    $('#' + id).hidden = i !== n;
+    const badge = $('#step-badge-' + i);
+    badge.toggleAttribute('aria-current', i === n); if (i === n) badge.setAttribute('aria-current', 'step');
+    badge.classList.toggle('done', i < n);
+  });
+  $('#back').hidden = n === 0;
+  $('#next').hidden = n === STAGES.length - 1;
+  $('#save').hidden = n !== STAGES.length - 1;
+}
+
+function simulateUpload() {
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    const ms = Date.now() - t0;
+    if (!$('#progress')) return clearInterval(tick);
+    if (ms < UPLOAD_MS) {
+      $('#progress').textContent = `Uploading ${Math.round(100 * ms / UPLOAD_MS)}%…`;
+    } else if (ms < UPLOAD_MS + PROCESS_MS) {
+      $('#progress').textContent = 'Upload complete. Processing… (Save is available when it ends)';
+    } else {
+      clearInterval(tick);
+      processed = true;
+      $('#progress').textContent = 'Checks complete. No issues found.';
+      $('#copyright-status').textContent = 'No issues found';
+      $('#save').disabled = false;
+    }
+  }, 250);
+}
+
+function save() {
+  if (!processed) return;
+  const visibility = checked('privacy');
+  $('#privacy-error').textContent = visibility ? '' : 'Choose who can watch your video';
+  if (!visibility) return;
+  if (B && !$('#guidelines').checked) {
+    $('#guidelines-error').textContent = 'Confirm that your video follows the Community Guidelines';
+    $('#guidelines').setAttribute('aria-invalid', 'true');
+    return; // refused: the dialog stays as it is
+  }
+  const title = $('#title-textbox').textContent.trim();
+  const id = Math.random().toString(36).slice(2, 10);
+  $('#videos').prepend(el(`<tr><td>${title.replace(/</g, '&lt;')}</td><td>${visibility[0] + visibility.slice(1).toLowerCase()}</td><td>Today</td></tr>`));
+  const dialog = $('#upload-dialog');
+  $('#wizard').remove();
+  $('h2', dialog).textContent = 'Upload videos';
+  dialog.append(el(`<div id="published" role="status">
+    <h2>${visibility === 'PUBLIC' ? 'Video published' : 'Video saved'}</h2>
+    <p>${visibility === 'PUBLIC' ? 'Your video is live.' : 'Your video is ' + visibility.toLowerCase() + '.'}</p>
+    <p>Video link: <a id="video-link" href="#watch/${id}">https://studio.example/watch/${id}</a></p>
+    <button type="button" class="primary" id="close-published">Close</button></div>`));
+  $('#close-published').addEventListener('click', () => $('#scrim').remove());
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Toggle test</title>
+<!-- Part of Agent Record Adapter (see NOTICE). Ported from the desktop-recorder-mcp fork. -->
+<style>label{display:block;margin:12px;font:16px sans-serif} input{width:20px;height:20px}</style></head><body>
+<h1>Toggle test</h1>
+<!-- Like a component library's control: the key is ignored, a click on the box works. -->
+<label><input type="checkbox" id="a" onkeydown="if(event.key===' ')event.preventDefault()" onkeyup="if(event.key===' ')event.preventDefault()"> Acepto</label>
+<!-- Changes neither by key nor by click. -->
+<label><input type="checkbox" id="b" onkeydown="if(event.key===' ')event.preventDefault()" onkeyup="if(event.key===' ')event.preventDefault()" onclick="return false"> Bloqueado</label>
+</body></html>

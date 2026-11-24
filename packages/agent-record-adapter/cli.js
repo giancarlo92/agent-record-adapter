@@ -1,0 +1,153 @@
+#!/usr/bin/env node
+// Part of Agent Record Adapter (see NOTICE).
+'use strict';
+
+// npx agent-record-adapter            install: pick your agents from a list
+// npx agent-record-adapter status     what is installed, and where
+// npx agent-record-adapter uninstall  remove it from your agents
+// npx agent-record-adapter app        open Desktop Recorder (record a task, play it again)
+// npx agent-record-adapter update     this version, for the agents already set up (Desktop Recorder runs it)
+
+const os = require('os');
+const path = require('path');
+const { agents } = require('./lib/agents');
+const { install, installedAgents, uninstall, status, layout } = require('./lib/install');
+const { multiselect, confirm } = require('./lib/prompt');
+
+const HELP = `agent-record-adapter: the official agent-desktop and agent-browser, plus background mode, record
+(events, video, an on-screen indicator), saved passwords and Desktop Recorder, for your AI agents
+
+Usage:
+  npx agent-record-adapter [install] [options]   install and set up the agents you pick
+  npx agent-record-adapter status                 what is installed, and where
+  npx agent-record-adapter uninstall [options]   remove it from the agents you pick
+  npx agent-record-adapter app                    open Desktop Recorder: record a task and play it again, without AI
+  npx agent-record-adapter@latest update          install this version for the agents already set up, without asking
+
+Options:
+  --agents a,b   the agents to set up, without asking: ${'claude-code, codex, gemini, claude-desktop, cursor, vscode, windsurf'}
+  --all          every agent found on this computer, without asking
+  --dry-run      say what would change, change nothing
+  --home DIR     act on another home folder (for tests)
+  --remove-program   with uninstall: also delete the programs and agent-browser (recordings are kept)
+  --no-browser   do not install agent-browser (web pages then need one installed by hand)
+  --restart-app  with update: open Desktop Recorder again when it is done
+  -h, --help     this help`;
+
+function parse(argv) {
+  const options = { command: 'install', agents: null, all: false, dryRun: false, home: null, removeProgram: false, restartApp: false, browser: true };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (['install', 'status', 'uninstall', 'app', 'update'].includes(arg)) options.command = arg;
+    else if (arg === '--restart-app') options.restartApp = true;
+    else if (arg === '--agents') options.agents = (argv[++i] || '').split(',').map((s) => s.trim()).filter(Boolean);
+    else if (arg === '--all') options.all = true;
+    else if (arg === '--dry-run') options.dryRun = true;
+    else if (arg === '--home') options.home = argv[++i];
+    else if (arg === '--remove-program') options.removeProgram = true;
+    else if (arg === '--no-browser') options.browser = false;
+    else if (arg === '-h' || arg === '--help') options.command = 'help';
+    else throw new Error(`Unknown option ${arg}; see --help`);
+  }
+  return options;
+}
+
+/**
+ * Installs this version for the agents that already have it, without asking: what Desktop
+ * Recorder's update button runs. It writes how it went where the app reads it, and opens the app
+ * again (the new one, or the one there was when the update failed).
+ */
+async function update(home, run, restartApp) {
+  const where = layout(home);
+  const resultFile = path.join(where.root, 'update-result.json');
+  const version = require('./package.json').version;
+  let result;
+  try {
+    // The app closes itself after starting this; give it a moment to let go of its file.
+    if (restartApp) await new Promise((done) => setTimeout(done, 1500));
+    const lines = install(installedAgents(run), { ...run, log: console.log });
+    lines.forEach((line) => console.log(line));
+    result = { ok: true, version, at: Date.now() };
+  } catch (error) {
+    console.error(`agent-record-adapter: ${error.message}`);
+    result = { ok: false, version, error: error.message, at: Date.now() };
+    process.exitCode = 1;
+  }
+  require('fs').mkdirSync(where.root, { recursive: true });
+  require('fs').writeFileSync(resultFile, JSON.stringify(result));
+  if (restartApp) openApp(home);
+}
+
+/** Opens the installed recorder app, without waiting for it. */
+function openApp(home) {
+  const app = layout(home).app;
+  if (!require('fs').existsSync(app)) {
+    console.log('Desktop Recorder is not installed yet: run npx agent-record-adapter first.');
+    process.exitCode = 1;
+    return;
+  }
+  require('child_process').spawn(app, [], { detached: true, stdio: 'ignore' }).unref();
+  console.log(`Desktop Recorder: ${app}`);
+}
+
+async function main() {
+  const options = parse(process.argv.slice(2));
+  if (options.command === 'help') return console.log(HELP);
+  if (process.platform !== 'win32' && !options.home) {
+    console.log('agent-record-adapter runs on Windows for now. macOS and Linux are coming soon.');
+    process.exitCode = 1;
+    return;
+  }
+  const home = options.home || os.homedir();
+  // Another home (tests) keeps everything there, the Start menu entry too.
+  const env = options.home
+    ? { ...process.env, APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local') }
+    : process.env;
+  // agent-browser comes from npm: not for another home (tests), where nothing is downloaded.
+  const run = { home, env, dryRun: options.dryRun, useCli: !options.home, removeProgram: options.removeProgram,
+    installBrowser: options.browser && !options.home };
+  if (options.command === 'status') return status(run).forEach((line) => console.log(line));
+  if (options.command === 'app') return openApp(home);
+  if (options.command === 'update') return update(home, run, options.restartApp);
+
+  const known = agents(home, env);
+  const found = known.filter((a) => a.detect());
+  let chosen = options.agents;
+  if (chosen) {
+    const ids = known.map((a) => a.id);
+    const unknown = chosen.filter((id) => !ids.includes(id));
+    if (unknown.length) throw new Error(`Unknown agent ${unknown.join(', ')}; use ${ids.join(', ')}`);
+  } else if (options.all) {
+    chosen = found.map((a) => a.id);
+  } else if (process.stdin.isTTY) {
+    const verb = options.command === 'uninstall' ? 'remove it from' : 'set it up in';
+    chosen = await multiselect(`Which agents do you want to ${verb}?`, known.map((a) => ({
+      label: a.name,
+      value: a.id,
+      checked: options.command === 'install' && a.detect(),
+      note: a.detect() ? '' : '(not found)',
+    })));
+  } else {
+    throw new Error('No terminal to ask in: pass --agents claude-code,codex or --all');
+  }
+  if (!chosen.length) return console.log('Nothing chosen, nothing changed.');
+
+  if (options.command === 'uninstall') {
+    return uninstall(chosen, run).forEach((line) => console.log(line));
+  }
+  if (!options.dryRun && process.stdin.isTTY && !options.agents && !options.all) {
+    const where = layout(home);
+    const ok = await confirm(`Install the program in ${where.bin} and set up ${chosen.length} agent(s)?`, true);
+    if (!ok) return console.log('Nothing changed.');
+  }
+  install(chosen, { ...run, log: console.log }).forEach((line) => console.log(line));
+  if (!options.dryRun) {
+    console.log('\nOpen a new conversation in each agent and ask it: "What displays do I have?"');
+    console.log('To record: "Record the Excel window with video and save it in D:\\Videos\\task.mp4".');
+  }
+}
+
+main().catch((error) => {
+  console.error(`agent-record-adapter: ${error.message}`);
+  process.exitCode = 1;
+});

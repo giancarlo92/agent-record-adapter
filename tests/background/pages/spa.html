@@ -1,0 +1,14 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>SPA-like test</title></head><body>
+<!-- Part of Agent Record Adapter (see NOTICE). Ported from the desktop-recorder-mcp fork. -->
+<nav><a href="?r=home" data-r="home">Inicio</a> <a href="?r=usuarios" data-r="usuarios">Usuarios</a></nav>
+<p id="view" role="status" aria-label="vista">vista: ?</p>
+<script>
+// Like an Angular app: a full load always starts at home (the route state lives only in memory),
+// while its own links change the route with pushState and render on popstate.
+const route = () => new URLSearchParams(location.search).get('r') || 'home';
+const render = () => { const v = document.getElementById('view'); v.textContent = 'vista: ' + route(); v.setAttribute('aria-label', 'vista ' + route()); };
+if (route() !== 'home') history.replaceState(null, '', '?r=home');
+render();
+addEventListener('popstate', render);
+document.querySelectorAll('a[data-r]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); history.pushState(null, '', '?r=' + a.dataset.r); render(); }));
+</script></body></html>

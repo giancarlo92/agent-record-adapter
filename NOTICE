@@ -1,0 +1,29 @@
+Agent Record Adapter
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project builds on two projects by Vercel Labs, both licensed under the Apache License,
+Version 2.0, and used unmodified:
+
+- agent-desktop (https://github.com/vercel-labs/agent-desktop), a git submodule in
+  vendor/agent-desktop. The engine (crates/engine) compiles its own sources, unmodified, with
+  this project's adapter; the installer copies its agent-desktop and agent-desktop-windows
+  skills unmodified.
+- agent-browser (https://github.com/vercel-labs/agent-browser), a git submodule in
+  vendor/agent-browser, installed for users from its official npm package, unmodified; the
+  installer copies its agent-browser skill unmodified.
+
+Agent Record Adapter is not the official agent-desktop or agent-browser and is not endorsed by
+Vercel. "agent-desktop", "agent-browser" and "Vercel" are names of their owners.
+
+Parts of this project were first written in the desktop-recorder-mcp fork of agent-desktop
+(https://github.com/giancarlo92/agent-desktop, branch feat/record) by the same author, and moved
+here: the background mode, the recorder, secrets, the stroke, menu, click-at and navigate
+commands, the Desktop Recorder app (apps/recorder), the installer (packages/agent-record-adapter)
+and the desktop-recording, recording-to-script and script-repair skills. Code in this project
+that was copied or adapted from agent-desktop's sources carries a notice saying so.
+
+Desktop Recorder uses icons from Tabler Icons (https://tabler.io/icons), MIT License; the licence
+is in apps/recorder/assets/icons/LICENSE-tabler-icons.txt.
+
+THIRD-PARTY-LICENSES.txt lists the licences of the Rust crates the programs are built with.

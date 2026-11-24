@@ -1,0 +1,7 @@
+vendor/
+skills/
+LICENSE
+NOTICE
+node_modules/
+*.tgz
+THIRD-PARTY-LICENSES.txt

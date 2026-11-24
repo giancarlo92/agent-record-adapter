@@ -1,0 +1,4 @@
+# Part of the desktop-recorder-mcp fork of agent-desktop (see NOTICE).
+# Bash fails on scripts with Windows line endings; keep them LF on every checkout.
+*.sh text eol=lf
+*.js text eol=lf

@@ -1,0 +1,63 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>SGH-like test</title>
+<!-- Part of Agent Record Adapter (see NOTICE). Ported from the desktop-recorder-mcp fork. -->
+<style>
+body{font-family:sans-serif;margin:0;display:flex}
+nav{width:260px;background:#f4f4f4}
+ul.menu-items{list-style:none;margin:0;padding:8px}
+.menu-item-content{padding:4px 16px;cursor:pointer}
+.badge{background:#888;color:#fff;border-radius:8px;padding:0 5px;margin-left:6px;font-size:11px}
+.submenu{display:none;list-style:none;padding-left:24px}
+.menu-item.active .submenu{display:block}
+.submenu-item{display:block;padding:6px 0;cursor:pointer}
+main{padding:16px;flex:1}
+td{padding:4px 8px;border-bottom:1px solid #ddd}
+.icon{display:inline-block;width:18px;height:18px;background:#36c;border-radius:3px;margin:0 3px;cursor:pointer}
+.icon.toggle{background:#c63}
+.row{display:flex;gap:8px;margin:6px 0}.col-label{width:160px}
+.p-radiobutton{display:inline-block;position:relative;width:18px;height:18px;vertical-align:middle;cursor:pointer}
+.p-hidden-accessible{border:0;clip:rect(0 0 0 0);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px}
+.p-radiobutton-box{width:16px;height:16px;border:1px solid #555;border-radius:50%}
+.p-radiobutton-box.p-highlight{background:#36c}
+.opt{margin:4px 0}
+</style></head><body>
+<nav>
+ <ul class="menu-items" role="listbox">
+  <li role="option"><div class="menu-item"><div class="menu-item-content"><span class="menu-item-text">Personal</span><span class="badge">2</span></div>
+   <ul class="submenu"><li><a class="submenu-item" data-to="usuarios">Usuarios</a></li><li><a class="submenu-item" data-to="roles">Roles</a></li></ul></div></li>
+  <li role="option"><div class="menu-item"><div class="menu-item-content"><span class="menu-item-text">Configuraciones</span><span class="badge">3</span></div>
+   <ul class="submenu"><li><a class="submenu-item" data-to="departamentos">Departamentos Clínicos</a></li><li><a class="submenu-item" data-to="sedes">Sedes</a></li><li><a class="submenu-item" data-to="otros">Otros</a></li></ul></div></li>
+ </ul>
+</nav>
+<main>
+ <p id="status" role="status" aria-label="estado">estado: inicio</p>
+ <table><tbody>
+  <tr><td>QA26A1197</td><td>Departamento de ensayo</td><td><span class="icon edit" data-row="QA26A1197"></span><span class="icon toggle" data-row="QA26A1197"></span></td></tr>
+  <tr><td>CARD01</td><td>Cardiología</td><td><span class="icon edit" data-row="CARD01"></span><span class="icon toggle" data-row="CARD01"></span></td></tr>
+  <tr><td>OFT01</td><td>Oftalmología</td><td><span class="icon edit" data-row="OFT01"></span><span class="icon toggle" data-row="OFT01"></span></td></tr>
+ </tbody></table>
+ <form>
+  <div class="row"><div class="col-label"><label>Apellido Paterno</label></div><div class="col-input"><input type="text" class="f"></div></div>
+  <div class="row"><div class="col-label"><label>Apellido Materno</label></div><div class="col-input"><input type="text" class="f"></div></div>
+  <div class="row"><div class="col-input"><input type="text" class="f"></div><label>Primer Nombre</label></div>
+  <div class="row"><div class="col-label"><label>F. Nacimiento</label></div><div class="col-input"><span class="p-calendar"><input type="text" class="f"></span></div></div>
+ </form>
+ <div id="pay">
+  <div class="opt"><div class="p-radiobutton" data-v="hc"><div class="p-hidden-accessible"><input type="radio" name="tp" value="hc" aria-label="Pago con HC / cuenta" checked></div><div class="p-radiobutton-box p-highlight"></div></div> <label>Pago con HC / cuenta</label></div>
+  <div class="opt"><div class="p-radiobutton" data-v="directo"><div class="p-hidden-accessible"><input type="radio" name="tp" value="directo" aria-label="Pago directo"></div><div class="p-radiobutton-box"></div></div> <label>Pago directo</label></div>
+  <div class="opt"><div class="p-radiobutton" data-v="proc"><div class="p-hidden-accessible"><input type="radio" name="tp" value="proc" aria-label="Pago de procedimiento"></div><div class="p-radiobutton-box"></div></div> <label>Pago de procedimiento</label></div>
+ </div>
+</main>
+<script>
+const status = (t) => { const s = document.getElementById('status'); s.textContent = 'estado: ' + t; s.setAttribute('aria-label', 'estado ' + t); };
+document.querySelectorAll('.menu-item').forEach(m => m.addEventListener('click', () => {}));
+document.querySelectorAll('.menu-item-content').forEach(h => h.addEventListener('click', () => h.parentElement.classList.toggle('active')));
+document.querySelectorAll('.submenu-item').forEach(a => a.addEventListener('click', () => status('abierto ' + a.dataset.to)));
+document.querySelectorAll('.icon').forEach(i => i.addEventListener('click', () => status((i.classList.contains('edit') ? 'editar ' : 'estado ') + i.dataset.row)));
+document.querySelectorAll('input.f').forEach((f, n) => f.addEventListener('input', () => status('campo ' + n + '=' + f.value)));
+// PrimeNG: the model changes only on the container's click; the hidden input's own checked state is overwritten from the model.
+let model = 'hc';
+const render = () => document.querySelectorAll('.p-radiobutton').forEach(r => { const on = r.dataset.v === model; r.querySelector('.p-radiobutton-box').classList.toggle('p-highlight', on); const i = r.querySelector('input'); i.checked = on; i.setAttribute('aria-checked', on); });
+document.querySelectorAll('.p-radiobutton').forEach(r => r.addEventListener('click', () => { model = r.dataset.v; render(); status('pago ' + model); }));
+document.querySelectorAll('.p-radiobutton input').forEach(i => i.addEventListener('change', () => setTimeout(render, 0)));
+render();
+</script></body></html>

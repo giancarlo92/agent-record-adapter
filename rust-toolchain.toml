@@ -1,0 +1,5 @@
+# Part of Agent Record Adapter (see NOTICE).
+[toolchain]
+channel  = "1.89.0"
+profile  = "minimal"
+components = ["clippy", "rustfmt"]

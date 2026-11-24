@@ -1,0 +1,56 @@
+# Part of Agent Record Adapter (see NOTICE).
+# Agent Record Adapter: one product made of the unmodified vercel-labs
+# agent-desktop and agent-browser (git submodules under vendor/) plus our layer.
+[workspace]
+members  = ["crates/windows-adapter", "crates/engine", "crates/browser", "crates/record", "crates/cli"]
+exclude  = ["vendor", "apps/recorder"]
+resolver = "2"
+
+[workspace.package]
+edition      = "2024"
+rust-version = "1.89"
+license      = "Apache-2.0"
+version      = "0.1.0"
+
+[workspace.dependencies]
+clap               = { version = "4.6", features = ["derive"] }
+serde              = { version = "1.0", features = ["derive"] }
+serde_json         = { version = "1.0", features = ["float_roundtrip"] }
+thiserror          = "2.0"
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64             = "0.23"
+libc               = "0.2"
+agent-desktop-core = { path = "vendor/agent-desktop/crates/core" }
+upstream-windows   = { package = "agent-desktop-windows", path = "vendor/agent-desktop/crates/windows" }
+
+# Same lints as upstream, so its own sources compile here exactly as there.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+unreachable_pub        = "allow"
+unused_must_use        = "deny"
+let_underscore_drop    = "allow"
+
+[workspace.lints.clippy]
+dbg_macro              = "deny"
+todo                   = "warn"
+needless_collect       = "warn"
+redundant_clone        = "allow"
+unwrap_used            = "allow"
+expect_used            = "allow"
+needless_pass_by_value = "allow"
+manual_let_else        = "allow"
+items_after_statements = "allow"
+collapsible_if         = "allow"
+print_stdout           = "allow"
+print_stderr           = "allow"
+
+[profile.release]
+opt-level     = "z"
+lto           = true
+codegen-units = 1
+strip         = true
+panic         = "abort"
+
+[profile.release.package.agent-desktop-core]
+opt-level = 3

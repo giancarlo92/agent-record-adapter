@@ -1,0 +1,27 @@
+# Part of Agent Record Adapter (see NOTICE).
+[package]
+name        = "agent-record"
+description = "One CLI and MCP server for desktop apps (agent-desktop), web pages (agent-browser) and recording, all in the background"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+agent-desktop-core    = { package = "agent-record-core", path = "../record" }
+agent-record-browser  = { path = "../browser" }
+clap.workspace        = true
+serde.workspace       = true
+serde_json.workspace  = true
+rpassword             = "7"
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+agent-record-windows = { path = "../windows-adapter" }
+
+[[bin]]
+name = "agent-record"
+path = "src/main.rs"
+
+[lints]
+workspace = true

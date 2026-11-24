@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Slow select test</title></head><body>
+<!-- Part of Agent Record Adapter (see NOTICE). Ported from the desktop-recorder-mcp fork. -->
+<h1>Slow select test</h1>
+<label for="dest">Destination</label>
+<select id="dest"><option>Save as PDF</option><option>Microsoft Print to PDF</option><option>OneNote</option></select>
+<script>
+// Like Chrome's print preview: after a change the list shows the previous option for a moment.
+const s = document.getElementById('dest'); let shown = s.value;
+s.addEventListener('change', () => { const next = s.value; setTimeout(() => { s.value = shown; }, 60); setTimeout(() => { s.value = next; shown = next; }, 700); });
+</script></body></html>

@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- Part of Agent Record Adapter (see NOTICE). -->
+<!-- A login form whose fields have no names or labels (common on real sites):
+     upstream refuses their refs as not unique; secret fill finds the password
+     field by its place. The page shows the password's length, never its text. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Unnamed login test</title></head>
+<body>
+  <form onsubmit="return false">
+    <div><input type="text"></div>
+    <div><input type="text"></div>
+    <div><input type="password" oninput="show()"></div>
+  </form>
+  <p id="status">pw-len: 0</p>
+  <script>
+    function show() {
+      document.getElementById('status').textContent = 'pw-len: ' + document.querySelector("input[type=password]").value.length;
+    }
+  </script>
+</body>
+</html>
