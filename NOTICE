@@ -16,10 +16,10 @@ Version 2.0, and used unmodified:
 Agent Record Adapter is not the official agent-desktop or agent-browser and is not endorsed by
 Vercel. "agent-desktop", "agent-browser" and "Vercel" are names of their owners.
 
-Parts of this project were first written in the desktop-recorder-mcp fork of agent-desktop
-(https://github.com/giancarlo92/agent-desktop, branch feat/record) by the same author, and moved
-here: the background mode, the recorder, secrets, the stroke, menu, click-at and navigate
-commands, the Desktop Recorder app (apps/recorder), the installer (packages/agent-record-adapter)
+Parts of this project were first written in desktop-recorder-mcp, a fork of agent-desktop by the
+same author (now removed), and moved here: the background mode, the recorder, secrets, the
+stroke, menu, click-at and navigate commands, the Desktop Recorder app (apps/recorder), the
+installer (packages/desktop-recorder-mcp)
 and the desktop-recording, recording-to-script and script-repair skills. Code in this project
 that was copied or adapted from agent-desktop's sources carries a notice saying so.
 

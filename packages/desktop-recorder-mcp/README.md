@@ -50,7 +50,7 @@ The installer also adds **Desktop Recorder**, a small floating bar (Start menu >
 
 Stopping writes the script that repeats the task (`script.mjs`), without AI. `node script.mjs --help` lists the values you can change each time; with none it repeats the task as recorded.
 
-The complete guide, step by step (the MCP tools, recording, demo videos made by an agent, checking a video, the app, known problems): [GUIDE.md](https://github.com/giancarlo92/agent-desktop/blob/feat/record/packages/desktop-recorder-mcp/GUIDE.md).
+The complete guide, step by step (the MCP tools, recording, demo videos made by an agent, checking a video, the app, known problems): [GUIDE.md](https://github.com/giancarlo92/agent-record-adapter/blob/main/packages/desktop-recorder-mcp/GUIDE.md).
 
 ## Passwords
 

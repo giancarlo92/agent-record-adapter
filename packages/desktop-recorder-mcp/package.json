@@ -3,6 +3,15 @@
   "version": "1.0.0",
   "description": "Agent Record for your AI agents (Claude Code, Codex, Gemini CLI, Cursor, VS Code, OpenCode and Claude Desktop), in one package: agent-desktop and agent-browser built from the unmodified vercel-labs sources, plus a background-only mode (never your mouse, keyboard or focus), record, saved passwords and Desktop Recorder (record a task and play it again, without AI). Nothing else is downloaded or installed. Windows now; macOS and Linux coming soon.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/giancarlo92/agent-record-adapter.git",
+    "directory": "packages/desktop-recorder-mcp"
+  },
+  "homepage": "https://github.com/giancarlo92/agent-record-adapter#readme",
+  "bugs": {
+    "url": "https://github.com/giancarlo92/agent-record-adapter/issues"
+  },
   "bin": {
     "desktop-recorder-mcp": "cli.js"
   },
