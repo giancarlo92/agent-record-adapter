@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 agent-desktop-core    = { package = "agent-record-core", path = "../record" }
 agent-record-browser  = { path = "../browser" }
+agent-record-engine   = { path = "../engine" }
+agent-record-web-engine = { path = "../web-engine/cli" }
 clap.workspace        = true
 serde.workspace       = true
 serde_json.workspace  = true
@@ -18,6 +20,7 @@ tracing-subscriber.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 agent-record-windows = { path = "../windows-adapter" }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp"] }
 
 [[bin]]
 name = "agent-record"

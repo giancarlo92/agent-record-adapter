@@ -48,11 +48,11 @@ agent-record script-steps C:\my\scripts\sign-up.mjs   # its steps as JSON, for a
 
 ```powershell
 git submodule update --init
-cargo build --release            # target\release\agent-record.exe and agent-desktop.exe (the engine)
+cargo build --release -p agent-record   # target\release\agent-record.exe: carries the engine and agent-browser inside
 cargo test -p agent-record-core -p agent-record-windows -p agent-record -p agent-record-browser
 ```
 
-agent-browser is built from the unmodified submodule and shipped inside the installer package, next to `agent-record.exe`: `cargo build --release --manifest-path vendor/agent-browser/cli/Cargo.toml --target-dir target/agent-browser`. The package is `packages/desktop-recorder-mcp` (`npm run prepare-vendor` there copies the four programs in); it installs nothing from npm, and in every agent its MCP server is named `desktop-recorder`.
+The engine (agent-desktop with our adapter) and agent-browser are built from their unmodified submodules as libraries inside `agent-record.exe` (see docs/architecture.md, "One executable"). The package is `packages/desktop-recorder-mcp` (`npm run prepare-vendor` there copies in `agent-record.exe` and builds the recorder app with its hash); it installs two programs and nothing from npm, and in every agent its MCP server is named `desktop-recorder`.
 
 ## License
 

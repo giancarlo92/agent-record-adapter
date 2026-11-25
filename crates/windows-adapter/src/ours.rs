@@ -15,7 +15,12 @@ impl RecordOps for WindowsAdapter {
         path: &[String],
         lease: &InteractionLease,
     ) -> Result<Vec<String>, AdapterError> {
-        crate::actions::menu_command::invoke(window, path, lease.deadline())
+        let noted = crate::input::record::record_agent::before_menu(window);
+        let ran = crate::actions::menu_command::invoke(window, path, lease.deadline())?;
+        if let Some(noted) = noted {
+            noted.after_menu(&ran);
+        }
+        Ok(ran)
     }
 
     fn find_menu_item(
@@ -24,7 +29,12 @@ impl RecordOps for WindowsAdapter {
         search: &MenuSearch,
         lease: &InteractionLease,
     ) -> Result<Vec<String>, AdapterError> {
-        crate::actions::menu_command::find(window, search, lease.deadline())
+        let noted = crate::input::record::record_agent::before_menu(window);
+        let ran = crate::actions::menu_command::find(window, search, lease.deadline())?;
+        if let Some(noted) = noted {
+            noted.after_menu(&ran);
+        }
+        Ok(ran)
     }
 
     /// With a DevTools endpoint: through it (`--in-app` as the app's own
@@ -106,9 +116,13 @@ impl RecordOps for WindowsAdapter {
             crate::actions::focus_guard::PersonFront::now(),
             800,
         );
+        let noted = crate::input::record::record_agent::before_close(window);
         let result = crate::actions::close_window::close(window);
         if let Some(guard) = input.input_sent() {
             guard.finish();
+        }
+        if let (Ok(_), Some(noted)) = (&result, noted) {
+            noted.after_close();
         }
         result
     }

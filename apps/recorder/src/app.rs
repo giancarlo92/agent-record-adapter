@@ -190,6 +190,16 @@ impl App {
         self.spawn(move || Done::Updated(crate::update::run(&version)));
     }
 
+    /// Why agent-record cannot run: missing, or not the one this app was
+    /// installed with (its SHA-256 is checked once while the file is unchanged).
+    fn tool_problem(&self) -> Option<String> {
+        match tool::checked_agent_record() {
+            Ok(_) => None,
+            Err(_) if tool::agent_desktop().is_none() => Some(self.t.no_tool.to_owned()),
+            Err(_) => Some(self.t.changed_tool.to_owned()),
+        }
+    }
+
     /// Runs `call` on its own thread; its answer is taken in `poll`.
     fn spawn(&self, call: impl FnOnce() -> Done + Send + 'static) {
         let send = self.done.0.clone();
@@ -307,6 +317,10 @@ impl App {
             return;
         }
         let Some(target) = self.targets.get(self.target).cloned() else {
+            if let Some(problem) = self.tool_problem() {
+                self.error = Some(problem);
+            }
+            self.list_targets();
             return;
         };
         tool::save_settings(&self.folder, self.video);
@@ -335,6 +349,13 @@ impl App {
         match done {
             Done::Targets(targets) => {
                 self.listing = false;
+                // No display at all: agent-record did not run (a changed one is
+                // refused), so say why instead of a Record button that does nothing.
+                if targets.is_empty()
+                    && let Some(problem) = self.tool_problem()
+                {
+                    self.error = Some(problem);
+                }
                 // Keep what was chosen when the list changes under it.
                 let chosen = self.targets.get(self.target).map(|t| t.args.clone());
                 self.target = chosen

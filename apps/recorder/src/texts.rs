@@ -42,6 +42,8 @@ pub struct Texts {
     /// Whether the texts are the Spanish ones (the repair prompt follows them).
     pub spanish: bool,
     pub no_tool: &'static str,
+    /// agent-record is not the one this app was installed with.
+    pub changed_tool: &'static str,
     pub saving: &'static str,
 }
 
@@ -83,6 +85,7 @@ const EN: Texts = Texts {
     update_failed: "The update failed:",
     spanish: false,
     no_tool: "agent-record is missing: run npx desktop-recorder-mcp",
+    changed_tool: "agent-record was changed: reinstall it",
     saving: "Saving...",
 };
 
@@ -124,6 +127,7 @@ const ES: Texts = Texts {
     update_failed: "No se pudo actualizar:",
     spanish: true,
     no_tool: "Falta agent-record: ejecuta npx desktop-recorder-mcp",
+    changed_tool: "agent-record fue cambiado: reinstálalo",
     saving: "Guardando...",
 };
 

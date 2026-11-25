@@ -65,10 +65,21 @@ pub fn describe(step: &Step) -> String {
         } => format!("Click \"{field}\" (asks before it runs)"),
         Action::Click { field, .. } => format!("Click \"{field}\""),
         Action::MenuItem { name } => format!("Choose \"{name}\" in the menu"),
+        Action::Menu { path } => format!("Choose \"{}\" in the menu", path.join(" > ")),
+        Action::Expand {
+            field, open: true, ..
+        } => format!("Expand \"{field}\""),
+        Action::Expand {
+            field, open: false, ..
+        } => format!("Collapse \"{field}\""),
+        Action::Close => format!("Close the window \"{}\"", window_name(&step.window)),
         Action::ClickAt { dx, dy, .. } => {
             format!("Click the window at {dx}, {dy} (something with no name)")
         }
-        Action::Key { keys } => format!("Press {keys} (through its menu item)"),
+        Action::ClickIn { field, .. } => {
+            format!("Click inside \"{field}\" (something with no name)")
+        }
+        Action::Key { keys } => format!("Press {keys}"),
         Action::Paste { field, .. } => format!("Paste the clipboard into \"{field}\""),
         Action::Secret { field, name, .. } => {
             format!("Fill \"{field}\" with the saved password \"{name}\"")
@@ -170,8 +181,25 @@ fn body(step: &Step, param: Option<&Param>) -> String {
             format!("{ask}    await (await {w}.find({})).click();\n", query(at))
         }
         Action::MenuItem { name } => format!("    await {w}.chooseMenuItem({});\n", js(name)),
+        Action::Menu { path } => format!(
+            "    await {w}.menu({});\n",
+            path.iter().map(|p| js(p)).collect::<Vec<_>>().join(", ")
+        ),
+        Action::Expand { at, open, .. } => format!(
+            "    await (await {w}.find({})).{}();\n",
+            query(at),
+            if *open { "expand" } else { "collapse" }
+        ),
+        Action::Close => format!("    await {w}.close();\n"),
         Action::ClickAt { dx, dy, double } => format!(
             "    await {w}.clickAtOffset({dx}, {dy}{});\n",
+            if *double { ", { double: true }" } else { "" }
+        ),
+        Action::ClickIn {
+            at, dx, dy, double, ..
+        } => format!(
+            "    await {w}.clickIn({}, {dx}, {dy}{});\n",
+            query(at),
             if *double { ", { double: true }" } else { "" }
         ),
         Action::Key { keys } => format!("    await {w}.shortcut({});\n", js(keys)),
@@ -220,8 +248,13 @@ fn parts(window: &WindowRef) -> String {
 }
 
 fn query(at: &Locator) -> String {
+    // An id goes with the role: ids an app numbers (a dialog's Save button is 1) repeat on other
+    // kinds of element (the first file of the dialog's list is 1 too).
     if let Some(id) = &at.native_id {
-        return format!("{{ nativeId: {} }}", js(id));
+        return match &at.role {
+            Some(role) => format!("{{ nativeId: {}, role: {} }}", js(id), js(role)),
+            None => format!("{{ nativeId: {} }}", js(id)),
+        };
     }
     let mut parts = Vec::new();
     if let Some(role) = &at.role {
@@ -234,6 +267,16 @@ fn query(at: &Locator) -> String {
         parts.push("inDocument: true".to_owned());
     }
     format!("{{ {} }}", parts.join(", "))
+}
+
+/// What a person calls a window in a message: its program ("Notepad", "dbeaver"); the title
+/// names a document that changes between runs.
+fn window_name(window: &WindowRef) -> String {
+    let app = window.app.trim();
+    app.strip_suffix(".exe")
+        .or_else(|| app.strip_suffix(".EXE"))
+        .unwrap_or(app)
+        .to_owned()
 }
 
 /// A web page's title without the browser's name.

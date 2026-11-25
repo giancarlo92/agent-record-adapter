@@ -155,6 +155,15 @@ export class Element {
     if (await this.is('checked')) throw new ScriptError(`${this} is still checked`);
   }
 
+  /** Opens a tree item to show what is inside it (a click only selects it). */
+  async expand() {
+    return run('expand', this.ref);
+  }
+
+  async collapse() {
+    return run('collapse', this.ref);
+  }
+
   /**
    * Writes a saved password into this field, by name. The first time, when nothing is saved under
    * that name, a small window asks the person for it once; it is never seen by the script.
@@ -335,14 +344,15 @@ export class Window {
   }
 
   /**
-   * Does what pressing `keys` does ('ctrl+return'), without the keyboard: runs the menu item that
-   * shows those keys, anywhere in this window's menu bar.
+   * Does what pressing `keys` does ('ctrl+return'), without the keyboard and without the focus:
+   * the menu item or button that shows those keys runs, else the keys go to what has the focus in
+   * this window.
    */
   async shortcut(keys) {
     try {
-      return await run('menu', '--window-id', this.id, '--shortcut', keys);
+      return await run('press', keys, '--window-id', this.id);
     } catch (error) {
-      throw new ScriptError(`${keys} cannot be done in the background in ${this}: no menu item runs with it (${error.message})`);
+      throw new ScriptError(`${keys} cannot be done in the background in ${this} (${error.message})`);
     }
   }
 
@@ -410,6 +420,16 @@ export class Window {
     return this.clickAt(now.bounds.x + dx, now.bounds.y + dy, { double, screen: true });
   }
 
+  /**
+   * Clicks `dx`, `dy` screen pixels from the top-left corner of the element `query` finds, once it
+   * is there: content with no element of its own inside a panel that has a name (a cell of a
+   * results grid inside its results tab). The panel need not be something you can act on.
+   */
+  async clickIn(query, dx, dy, { double = false, timeoutMs = 15000 } = {}) {
+    const b = await this.boundsOf(query, { timeoutMs });
+    return this.clickAt(b.x + dx, b.y + dy, { double, screen: true });
+  }
+
   /** Saves a PNG of this window, even behind others. */
   async screenshot(file) {
     return run('screenshot', '--window-id', this.id, file);
@@ -451,12 +471,17 @@ export async function findWindow(title, { app, pid, timeoutMs = 30000 } = {}) {
     const best = windows.filter((w) => score(w) > 0).sort((a, b) => score(b) - score(a))[0];
     return best || (parts.length === 0 ? windows[0] : null);
   }, () => `No window titled "${parts ? parts.join(' - ') : title}"${app ? ` of ${app}` : ''}`);
+  return shown(info);
+}
+
+/** A window as list-windows gave it, shown behind the others first when it is minimized. */
+async function shown(info) {
   if (info.minimized) {
     // A minimized window shows no elements; restore shows it again without bringing it forward.
     await run('restore', '--window-id', info.id);
     await sleep(500);
-    const shown = (await run('list-windows')).find((w) => w.id === info.id);
-    if (shown) Object.assign(info, shown);
+    const now = (await run('list-windows')).find((w) => w.id === info.id);
+    if (now) Object.assign(info, now);
   }
   return new Window(info);
 }
@@ -464,15 +489,48 @@ export async function findWindow(title, { app, pid, timeoutMs = 30000 } = {}) {
 /**
  * Opens an app with `launch` (it never takes the focus) and returns its window. `title` is a part
  * of the window's title (or a list of parts, see findWindow), `image` the program's file name
- * ("dbeaver.exe"): an app that is already open is used as it is.
+ * ("dbeaver.exe"): a window already open with that whole title is used as it is; otherwise the
+ * window the launch opens (a new Notepad window, never another document's), or, for an app that
+ * keeps one window, the one it has.
  */
 export async function openApp(app, { title, image, args = [], timeoutMs = 30000 } = {}) {
+  const parts = Array.isArray(title) ? title.filter(Boolean) : null;
+  let before = [];
   if (image) {
-    const open = await findWindow(title, { app: image, timeoutMs: 1 }).catch(() => null);
-    if (open) return open;
+    const windows = await run('list-windows', '--app', image).catch(() => []);
+    before = windows.map((w) => w.id);
+    // An open window with the whole title the recording saw is the one (DBeaver with its
+    // connection). Only the app's name in common is not: Notepad's other window holds another
+    // document, and the step wants a new one.
+    const whole = (w) => (parts ? parts.every((part) => (w.title || '').includes(part)) : (w.title || '').includes(title || ''));
+    const open = windows.find(whole);
+    if (open) return shown(open);
   }
   const launched = await run('launch', app, ...args.map((a) => `--arg=${a}`), '--timeout', timeoutMs);
-  // An app that runs once hands the launch to the copy already open and ends: look by image then.
+  if (image) {
+    // The window the launch opened, new among the app's windows. An app that runs once hands the
+    // launch to the copy already open and ends with no new window: its window by title then.
+    // A window that only shows while the app starts (a splash screen) is new too, but has none of
+    // the title the recording saw: the wait goes on for the one that has it.
+    const started = Date.now();
+    let anyNew = false;
+    const matches = (w) => (parts ? parts.some((part) => (w.title || '').includes(part)) : !title || (w.title || '').includes(title));
+    const fresh = await until(timeoutMs, async () => {
+      const now = await run('list-windows', '--app', image);
+      const added = now.filter((w) => !before.includes(w.id) && w.title);
+      anyNew = anyNew || added.length > 0;
+      const found = added.find(matches);
+      if (found) return found;
+      return !anyNew && Date.now() - started > 10000 ? { none: true } : null;
+    }, () => '').catch(() => null);
+    if (fresh && fresh.id) return shown(fresh);
+    // No new window: an app that keeps one window (DBeaver) took the launch in it. Several
+    // windows, or one with unsaved changes (a title starting with *), hold other documents: the
+    // task's steps must not go into one of them.
+    const windows = await run('list-windows', '--app', image);
+    if (windows.length === 1 && !(windows[0].title || '').trim().startsWith('*')) return shown(windows[0]);
+    throw new ScriptError(`${app} opened no new window, and the ${windows.length === 1 ? 'one it has holds unsaved changes' : `${windows.length} it has hold other documents`}: close them, or open its window first`);
+  }
   return findWindow(title, { app: image, pid: title || image ? undefined : launched && launched.pid, timeoutMs });
 }
 

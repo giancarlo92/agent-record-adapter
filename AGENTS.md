@@ -21,6 +21,7 @@ cargo build --workspace
 cargo test -p agent-record-core -p agent-record-windows -p agent-record -p agent-record-browser
 cargo test -p agent-record-engine --bins -- --skip shell_surface --skip surfaces --skip contract_command_surface
 python scripts/gen_forwarding.py --check
+python scripts/sync_web_engine.py --check
 ```
 
 The shell-surface tests press real Win+A (Quick Settings): never run them.

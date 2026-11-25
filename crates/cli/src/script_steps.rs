@@ -921,6 +921,16 @@ impl Reader {
                 self.act(kind, w, fields);
                 Ok(Sym::Val(Val::Null))
             }
+            "clickIn" => {
+                let target = target(self.arg(args, 0)?.as_ref())?;
+                let dx = coordinate(self.arg(args, 1)?)?;
+                let dy = coordinate(self.arg(args, 2)?)?;
+                let mut fields = vec![("target", Value::Object(target)), ("dx", dx), ("dy", dy)];
+                let options = options(self.arg(args, 3)?.as_ref())?;
+                fields.extend(options.iter().map(|(k, v)| (k.as_str(), v.clone())));
+                self.act("click_in", w, fields);
+                Ok(Sym::Val(Val::Null))
+            }
             "screenshot" => {
                 let file = value(self.arg(args, 0)?.as_ref())?;
                 self.act("screenshot", w, vec![("file", file)]);
@@ -947,7 +957,7 @@ impl Reader {
         let w = Some(window);
         let target = ("target", Value::Object(target));
         match method {
-            "click" | "clear" | "check" | "uncheck" | "paste" => {
+            "click" | "clear" | "check" | "uncheck" | "paste" | "expand" | "collapse" => {
                 self.act(method, w, vec![target]);
                 Ok(Sym::Val(Val::Null))
             }
@@ -1205,6 +1215,9 @@ fn acting(method: &str) -> bool {
             | "chooseMenuItem"
             | "clickAt"
             | "clickAtOffset"
+            | "clickIn"
+            | "expand"
+            | "collapse"
             | "screenshot"
             | "close"
     )

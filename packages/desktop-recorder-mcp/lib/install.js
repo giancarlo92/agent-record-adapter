@@ -1,10 +1,10 @@
 // Part of Agent Record Adapter (see NOTICE).
 'use strict';
 
-// Installing desktop-recorder-mcp: every program comes inside this one package and goes into one
-// folder of its own (agent-record, the front; agent-desktop, the engine built from the unmodified
-// upstream sources with our adapter; agent-browser, built from its unmodified upstream sources;
-// Desktop Recorder). Nothing is downloaded or installed from another package. Then, for each chosen
+// Installing desktop-recorder-mcp: two programs come inside this one package and go into one
+// folder of its own: agent-record (which carries inside the agent-desktop engine with our adapter
+// and agent-browser, both built from their unmodified upstream sources) and Desktop Recorder.
+// Nothing is downloaded or installed from another package. Then, for each chosen
 // agent, the MCP server and, where the agent reads skills from a folder, the skills.
 
 const fs = require('fs');
@@ -26,8 +26,10 @@ const OUR_SKILLS = ['agent-record-background', 'desktop-recording', 'recording-t
 // The install folder's name and the mark left in each skill folder we copy: the same as the earlier
 // releases, so their skills, saved passwords and recordings carry over.
 const MARKER = '.desktop-recorder-mcp';
-// What earlier builds left that this one no longer uses: agent-browser installed from npm.
+// What earlier builds left that this one no longer uses: agent-browser installed from npm, and the
+// engine and agent-browser as programs of their own (agent-record carries both inside now).
 const LEGACY_FOLDERS = ['browser'];
+const LEGACY_PROGRAMS = ['agent-desktop.exe', 'agent-browser.exe'];
 
 /** The built programs: the package's vendor folder, or DESKTOP_RECORDER_MCP_VENDOR (tests). */
 function vendorDir() {
@@ -46,29 +48,24 @@ function layout(home) {
   return {
     root,
     bin: path.join(root, 'bin'),
-    // The front every agent and script runs: agent-desktop's commands plus ours, and the MCP server.
+    // The one program every agent and script runs: agent-desktop's commands plus ours, web pages
+    // (agent-browser) and the MCP server; it carries the engine and agent-browser inside.
     exe: path.join(root, 'bin', 'agent-record.exe'),
-    // The engine the front delegates agent-desktop's own commands to.
-    engine: path.join(root, 'bin', 'agent-desktop.exe'),
     // The small recorder app (Record / Stop, its recordings, Play), next to agent-record.
     app: path.join(root, 'bin', 'desktop-recorder.exe'),
-    // agent-browser, built from its unmodified sources, which the front runs for web pages.
-    browser: path.join(root, 'bin', 'agent-browser.exe'),
     // The tool's private state (refs, snapshots, recordings), apart from the upstream tool's ~/.agent-desktop.
     state: path.join(root, 'state'),
   };
 }
 
 function server(where) {
-  return { command: where.exe, args: ['mcp'], env: { AGENT_DESKTOP_HOME: where.state, AGENT_BROWSER_BIN: where.browser } };
+  return { command: where.exe, args: ['mcp'], env: { AGENT_DESKTOP_HOME: where.state } };
 }
 
 /** The programs the package carries, by file name, and where each one goes. */
 function programs(where) {
   return [
     ['agent-record.exe', where.exe],
-    ['agent-desktop.exe', where.engine],
-    ['agent-browser.exe', where.browser],
     ['desktop-recorder.exe', where.app],
   ];
 }
@@ -82,13 +79,36 @@ function installProgram(where, log) {
   fs.mkdirSync(where.bin, { recursive: true });
   fs.mkdirSync(where.state, { recursive: true });
   makePrivate(where.state);
+  makeWritableOnlyByYou(where.bin);
   removeSetAside(where.bin);
   for (const folder of LEGACY_FOLDERS) fs.rmSync(path.join(where.root, folder), { recursive: true, force: true });
   const kept = programs(where).map(([name, target]) => replace(path.join(vendor, name), target)).some(Boolean);
+  const retired = LEGACY_PROGRAMS.map((name) => retire(path.join(where.bin, name))).some(Boolean);
   // The recorder app reads it to know which version it is, and whether a newer one is out.
   fs.writeFileSync(path.join(where.bin, 'version.txt'), require('../package.json').version);
   log(`Program: ${where.exe}`);
-  if (kept) log('Agents that were open keep the previous version until they restart.');
+  if (kept || retired) log('Agents that were open keep the previous version until they restart.');
+}
+
+/**
+ * Removes a program an earlier build installed and this one carries inside agent-record. One that
+ * is running is set aside instead (renamed), and a later install deletes it. Returns whether it
+ * was set aside.
+ */
+function retire(file) {
+  if (!fs.existsSync(file)) return false;
+  try {
+    fs.rmSync(file, { force: true });
+    return false;
+  } catch (error) {
+    if (error.code !== 'EBUSY' && error.code !== 'EPERM') throw error;
+  }
+  try {
+    fs.renameSync(file, `${file}.old-${Date.now()}`);
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 /** The agents that have this MCP server set up now (what an update sets up again). */
@@ -181,6 +201,28 @@ function makePrivate(dir) {
   if (!/^S-1-\d+(-\d+)+$/.test(user)) throw new Error(`could not read your account's id to protect ${dir}`);
   const icacls = (...args) => execFileSync(path.join(system32, 'icacls.exe'), args, { stdio: 'ignore', windowsHide: true });
   icacls(dir, '/inheritance:r', '/grant:r', `*${user}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F');
+  if (fs.readdirSync(dir).length) icacls(path.join(dir, '*'), '/reset', '/T', '/C', '/Q');
+}
+
+/**
+ * The programs folder can be changed only by the person, SYSTEM and Administrators; everyone else
+ * (another account, a sandbox group such as Codex's, which gives itself access to folders under the
+ * person's home) can read and run what is in it but not replace it. Otherwise another program
+ * could swap agent-record.exe for its own and every agent would run it.
+ */
+function makeWritableOnlyByYou(dir) {
+  if (process.platform !== 'win32') {
+    fs.chmodSync(dir, 0o755);
+    return;
+  }
+  const system32 = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32');
+  const user = execFileSync(path.join(system32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true })
+    .trim().split(',').pop().replace(/"/g, '');
+  if (!/^S-1-\d+(-\d+)+$/.test(user)) throw new Error(`could not read your account's id to protect ${dir}`);
+  const icacls = (...args) => execFileSync(path.join(system32, 'icacls.exe'), args, { stdio: 'ignore', windowsHide: true });
+  // S-1-5-11: Authenticated Users, read and run only.
+  icacls(dir, '/inheritance:r', '/grant:r', `*${user}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F',
+    '*S-1-5-11:(OI)(CI)RX');
   if (fs.readdirSync(dir).length) icacls(path.join(dir, '*'), '/reset', '/T', '/C', '/Q');
 }
 
@@ -368,8 +410,7 @@ function status(options) {
   const where = layout(options.home);
   const lines = [
     `Program: ${fs.existsSync(where.exe) ? `${where.exe} (${version(where.exe) || 'unknown version'})` : 'not installed'}`,
-    `Engine: ${fs.existsSync(where.engine) ? `${where.engine} (agent-desktop ${version(where.engine) || 'unknown version'})` : 'not installed'}`,
-    `agent-browser: ${fs.existsSync(where.browser) ? where.browser : 'not installed'}`,
+    `Engine and agent-browser: inside agent-record${fs.existsSync(where.exe) ? ` (agent-desktop ${version(where.exe) || 'unknown version'})` : ''}`,
   ];
   for (const agent of agents(options.home, options.env)) {
     const found = agent.detect();

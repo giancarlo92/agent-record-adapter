@@ -1,7 +1,36 @@
 // Part of Agent Record Adapter (see NOTICE).
-//! Finding the official agent-browser binary.
+//! Starting agent-browser: the one agent-record.exe carries inside (see
+//! [`set_embedded`]), or a separate executable for development and tests.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::OnceLock;
+
+static EMBEDDED: OnceLock<fn() -> Option<Command>> = OnceLock::new();
+
+/// The program this runs in carries agent-browser: `make` gives a command
+/// that starts it (agent-record.exe registers this at start).
+pub fn set_embedded(make: fn() -> Option<Command>) {
+    let _ = EMBEDDED.set(make);
+}
+
+/// A command that starts agent-browser: `AGENT_RECORD_BROWSER_BIN` or
+/// `AGENT_BROWSER_BIN` when it names an executable that exists, else the one
+/// this program carries, else one found as [`find_agent_browser`] says.
+pub fn browser_command() -> Option<Command> {
+    for var in ["AGENT_RECORD_BROWSER_BIN", "AGENT_BROWSER_BIN"] {
+        if let Some(path) = std::env::var_os(var).filter(|p| !p.is_empty()) {
+            let path = PathBuf::from(path);
+            if path.is_file() {
+                return Some(command_for(&path));
+            }
+        }
+    }
+    if let Some(make) = EMBEDDED.get() {
+        return make();
+    }
+    find_agent_browser().map(|path| command_for(&path))
+}
 
 /// The agent-browser executable, looked up in this order:
 /// 1. `AGENT_RECORD_BROWSER_BIN`, then `AGENT_BROWSER_BIN` (the installer
@@ -90,17 +119,17 @@ fn on_path(names: &[&str]) -> Option<PathBuf> {
 }
 
 /// How to start `binary`: a `.cmd`/`.bat` shim goes through `cmd /C`.
-pub fn command_for(binary: &Path) -> std::process::Command {
+pub fn command_for(binary: &Path) -> Command {
     let is_script = binary
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"));
     if is_script {
-        let mut command = std::process::Command::new("cmd");
+        let mut command = Command::new("cmd");
         command.arg("/C").arg(binary);
         command
     } else {
-        std::process::Command::new(binary)
+        Command::new(binary)
     }
 }
 

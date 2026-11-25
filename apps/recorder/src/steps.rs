@@ -61,9 +61,30 @@ pub enum Action {
     MenuItem {
         name: String,
     },
+    /// A command of the window's menu bar run by its path (an agent's `menu`).
+    Menu {
+        path: Vec<String>,
+    },
+    /// A tree item opened (or closed) to show what is inside it.
+    Expand {
+        at: Locator,
+        field: String,
+        open: bool,
+    },
+    /// The window closed, as its own Close button does.
+    Close,
     /// A click on something with no element (a toolbar drawn by the app, a canvas): the same point
     /// of the window, in screen pixels from its top-left corner.
     ClickAt {
+        dx: i32,
+        dy: i32,
+        double: bool,
+    },
+    /// A click on something with no element of its own inside a panel that has a name (a cell of a
+    /// results grid in its results tab): the same point of that panel, once the panel is there.
+    ClickIn {
+        at: Locator,
+        field: String,
         dx: i32,
         dy: i32,
         double: bool,
@@ -164,6 +185,9 @@ const GENERIC_IDS: &[&str] = &[
 /// Apps whose windows are not part of the task: the taskbar and the Start menu (the script
 /// opens the app itself), the desktop's compositor, and this recorder.
 const NOT_THE_TASK: &[&str] = &["explorer.exe", "dwm.exe", "desktop-recorder.exe"];
+/// Keys that select everything: in a field the typed value already holds the result, anywhere else
+/// (a results grid, a list) they are the command the keys that follow act on (copy).
+const SELECT_ALL: &str = "ctrl+a";
 
 pub fn parse(recording: &str) -> Vec<Step> {
     let events: Vec<Value> = recording
@@ -178,6 +202,7 @@ pub fn parse(recording: &str) -> Vec<Step> {
     // holds what it did (a new line, an autocompletion), anything else makes it a step.
     let mut pending: Option<(Locator, Step)> = None;
     let mut right_click: Option<Step> = None;
+    let mut focus_click: Option<Step> = None;
     // The popup an autocompletion was picked in, so a second click in it is not another pick.
     let mut completed_in: Option<String> = None;
     let mut opened_apps: Vec<String> = Vec::new();
@@ -185,7 +210,10 @@ pub fn parse(recording: &str) -> Vec<Step> {
     let mut main_window: Vec<WindowRef> = Vec::new();
     for event in &events {
         let kind = event["kind"].as_str().unwrap_or_default();
-        if !matches!(kind, "click" | "type" | "select" | "press" | "drag") {
+        if !matches!(
+            kind,
+            "click" | "type" | "select" | "press" | "drag" | "close"
+        ) {
             continue;
         }
         let Some(window) = window_of(event) else {
@@ -205,6 +233,9 @@ pub fn parse(recording: &str) -> Vec<Step> {
             .trim()
             .to_owned();
         let at = locator(&element);
+        // A click on a container that may only have given the focus: it matters when the keys
+        // that follow act on what it focused (Ctrl+A and Ctrl+C in a results grid).
+        let focus = focus_click.take();
 
         // What a key pressed earlier did, now that the next event is known.
         if let Some((field, key_step)) = pending.take() {
@@ -286,7 +317,24 @@ pub fn parse(recording: &str) -> Vec<Step> {
                         continue;
                     }
                 }
-                if role == "menuitem" && !name.is_empty() {
+                if let Some(path) = menu_path(event) {
+                    steps.push(step(&window, Action::Menu { path }));
+                } else if let Some(open) = event["expand"].as_bool() {
+                    steps.push(step(
+                        &window,
+                        Action::Expand {
+                            at,
+                            field: name,
+                            open,
+                        },
+                    ));
+                } else if event.get("window_point").is_some()
+                    && (role.is_empty() || NO_ACTION_ROLES.contains(&role.as_str()))
+                    && let Some(action) = point_action(event, count == 2)
+                {
+                    // An agent's `click-at`: it chose that point of the window.
+                    steps.push(step(&window, action));
+                } else if role == "menuitem" && !name.is_empty() {
                     let owner = main_window
                         .iter()
                         .find(|w| w.app.eq_ignore_ascii_case(&window.app))
@@ -318,16 +366,11 @@ pub fn parse(recording: &str) -> Vec<Step> {
                 } else if role.is_empty()
                     && name.is_empty()
                     && !popup
-                    && let Some((dx, dy)) = offset(event)
+                    && let Some(action) = point_action(event, count == 2)
                 {
-                    steps.push(step(
-                        &window,
-                        Action::ClickAt {
-                            dx,
-                            dy,
-                            double: count == 2,
-                        },
-                    ));
+                    steps.push(step(&window, action));
+                } else if !popup && let Some(action) = point_action(event, count == 2) {
+                    focus_click = Some(step(&window, action));
                 }
             }
             "type" if role == "option" => last_option = Some(name),
@@ -428,7 +471,8 @@ pub fn parse(recording: &str) -> Vec<Step> {
                     ));
                     continue;
                 }
-                if EDIT_KEYS.contains(&keys.as_str())
+                let select_all_outside_field = keys == SELECT_ALL && !editable;
+                if (EDIT_KEYS.contains(&keys.as_str()) && !select_all_outside_field)
                     || (editable && moves_caret(&keys))
                     || (keys == "return" && role == "document")
                 {
@@ -443,6 +487,10 @@ pub fn parse(recording: &str) -> Vec<Step> {
                         },
                     )
                 } else if window.url.is_none() && is_command_key(&keys) {
+                    // The click that focused what the keys act on comes first.
+                    if let Some(focused) = focus.filter(|f| f.window.id == window.id) {
+                        steps.push(focused);
+                    }
                     step(&window, Action::Key { keys })
                 } else {
                     let place = if name.is_empty() {
@@ -463,6 +511,7 @@ pub fn parse(recording: &str) -> Vec<Step> {
                     steps.push(key_step);
                 }
             }
+            "close" => steps.push(step(&window, Action::Close)),
             "drag" => steps.push(step(
                 &window,
                 Action::Skipped {
@@ -512,12 +561,29 @@ fn step(window: &WindowRef, action: Action) -> Step {
 fn open_step(window: &WindowRef) -> Step {
     let action = match (&window.url, &window.path) {
         (Some(url), _) => Action::OpenBrowser { url: full_url(url) },
+        // An app installed as a Windows package (Notepad, Calculator) is opened by its name: its
+        // program started by path does not run as the package, and opens no window of its own.
+        (None, Some(path)) if is_packaged(path) => Action::OpenApp {
+            path: window
+                .app
+                .strip_suffix(".exe")
+                .or_else(|| window.app.strip_suffix(".EXE"))
+                .unwrap_or(&window.app)
+                .to_owned(),
+        },
         (None, Some(path)) => Action::OpenApp { path: path.clone() },
         (None, None) => Action::OpenApp {
             path: window.app.clone(),
         },
     };
     step(window, action)
+}
+
+/// Whether a program is part of an app installed as a Windows package.
+fn is_packaged(path: &str) -> bool {
+    path.to_ascii_lowercase()
+        .replace('/', "\\")
+        .contains("\\windowsapps\\")
 }
 
 /// A page address as a browser takes it. Recordings keep the scheme; an older one has the address
@@ -586,10 +652,51 @@ fn actionable(event: &Value) -> Value {
     element.clone()
 }
 
+/// The menu path an agent's `menu` ran (File, Save as...).
+fn menu_path(event: &Value) -> Option<Vec<String>> {
+    let path: Vec<String> = event["menu_path"]
+        .as_array()?
+        .iter()
+        .filter_map(|item| item.as_str().map(str::to_owned))
+        .collect();
+    (!path.is_empty()).then_some(path)
+}
+
 /// The full-window overlay a flyout menu puts up to close when clicked outside it.
 fn is_light_dismiss(element: &Value) -> bool {
     element["native_id"].as_str() == Some("Light Dismiss")
         || element["class_name"].as_str() == Some("PopupRoot")
+}
+
+/// A click at a point with no element of its own: inside the nearest panel around it that has a
+/// name (found again, and waited for, by that name), else at the same place of the window.
+fn point_action(event: &Value, double: bool) -> Option<Action> {
+    let point = &event["point"];
+    let (x, y) = (point["x"].as_f64()?, point["y"].as_f64()?);
+    let panel = event["ancestors"].as_array().and_then(|list| {
+        list.iter().find(|a| {
+            let name = a["name"].as_str().unwrap_or_default().trim();
+            // A long name is the content's own words (a cell's values), not a panel's name.
+            !name.is_empty()
+                && name.chars().count() <= 60
+                && a["role"].as_str().is_some_and(|r| r != "window")
+                && a["bounds"]["x"].is_number()
+        })
+    });
+    if let Some(panel) = panel {
+        let bounds = &panel["bounds"];
+        let dx = (x - bounds["x"].as_f64()?).round() as i32;
+        let dy = (y - bounds["y"].as_f64()?).round() as i32;
+        return Some(Action::ClickIn {
+            at: locator(panel),
+            field: panel["name"].as_str().unwrap_or_default().trim().to_owned(),
+            dx,
+            dy,
+            double,
+        });
+    }
+    let (dx, dy) = offset(event)?;
+    Some(Action::ClickAt { dx, dy, double })
 }
 
 /// Where a click on nothing that has a name was, from the window's top-left corner.

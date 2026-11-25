@@ -124,6 +124,99 @@ impl NotedPoint {
     }
 }
 
+/// A command agent-desktop is about to run on a whole window (`menu`,
+/// `close-window`), the window described now: closing it leaves nothing to
+/// describe.
+pub(crate) struct NotedWindow {
+    inboxes: Vec<std::path::PathBuf>,
+    kind: &'static str,
+    fields: Map<String, Value>,
+    spot: Option<(i32, i32)>,
+}
+
+/// Describes `window` before a menu command runs in it. `None` when no
+/// background recording runs.
+pub(crate) fn before_menu(window: &WindowInfo) -> Option<NotedWindow> {
+    noted_window(window, "click")
+}
+
+/// Describes `window` before it is closed (`close-window`). `None` when no
+/// background recording runs.
+pub(crate) fn before_close(window: &WindowInfo) -> Option<NotedWindow> {
+    noted_window(window, "close")
+}
+
+fn noted_window(window: &WindowInfo, kind: &'static str) -> Option<NotedWindow> {
+    let inboxes = running_agent_inboxes();
+    if inboxes.is_empty() {
+        return None;
+    }
+    let mut observer = observer()?;
+    let (fields, spot) = describe_window(&mut observer, window);
+    Some(NotedWindow {
+        inboxes,
+        kind,
+        fields,
+        spot,
+    })
+}
+
+impl NotedWindow {
+    /// Notes the menu command that ran, by its path (File, Save as...), as a
+    /// click on its menu item.
+    pub(crate) fn after_menu(mut self, path: &[String]) {
+        let Some(name) = path.last() else {
+            return;
+        };
+        self.fields.insert(
+            "element".into(),
+            json!({ "role": "menuitem", "name": name }),
+        );
+        self.fields.insert("menu_path".into(), json!(path));
+        self.fields.insert("button".into(), json!("left"));
+        self.fields.insert("count".into(), json!(1));
+        self.write();
+    }
+
+    /// Notes that the window was closed (or asked to save first).
+    pub(crate) fn after_close(self) {
+        self.write();
+    }
+
+    fn write(mut self) {
+        self.fields.insert("by".into(), json!("agent"));
+        let line = json!({
+            "kind": self.kind,
+            "at_ms": now_ms(),
+            "spot": self.spot.map(|(x, y)| json!([x, y])),
+            "fields": self.fields,
+        });
+        if let Ok(line) = serde_json::to_string(&line) {
+            for inbox in &self.inboxes {
+                append(inbox, &line);
+            }
+        }
+    }
+}
+
+/// The recorder's description of a whole window, and its middle.
+fn describe_window(
+    observer: &mut Observer,
+    window: &WindowInfo,
+) -> (Map<String, Value>, Option<(i32, i32)>) {
+    let handle: isize = window
+        .id
+        .strip_prefix("w-")
+        .and_then(|raw| raw.parse().ok())
+        .unwrap_or(0);
+    let spot = window
+        .bounds
+        .as_ref()
+        .map(|b| ((b.x + b.width / 2.0) as i32, (b.y + b.height / 2.0) as i32));
+    let target = observer.of_window(handle, spot.unwrap_or((0, 0)));
+    (observer.describe(&target), spot)
+}
+
 /// Notes a key agent-desktop pressed in a window (`press <key> --window-id`),
 /// on whatever has the focus there, in every background recording running.
 pub(crate) fn note_window_key(window: &WindowInfo, combo: &KeyCombo) {
@@ -216,7 +309,13 @@ fn describe(
     action: &Action,
 ) -> Option<String> {
     let kind = match action {
-        Action::Click | Action::Expand | Action::Collapse => click(&mut fields, "left", 1),
+        Action::Click => click(&mut fields, "left", 1),
+        // A tree item opened or closed: a replay opens or closes it again (a
+        // click alone only selects it).
+        Action::Expand | Action::Collapse => {
+            fields.insert("expand".into(), json!(matches!(action, Action::Expand)));
+            click(&mut fields, "left", 1)
+        }
         Action::DoubleClick => click(&mut fields, "left", 2),
         Action::TripleClick => click(&mut fields, "left", 3),
         Action::RightClick => click(&mut fields, "right", 1),

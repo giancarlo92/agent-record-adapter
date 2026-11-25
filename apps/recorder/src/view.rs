@@ -545,7 +545,7 @@ impl App {
                     ui,
                     label_at,
                     &format!("steps{}", item.dir.display()),
-                    self.t.show_steps,
+                    &format!("{}: {}", self.t.show_steps, folder_of(item)),
                 )
                 .clicked()
             {
@@ -556,7 +556,7 @@ impl App {
                 ui,
                 play_at,
                 &format!("play{}", item.dir.display()),
-                self.t.play,
+                &format!("{}: {}", self.t.play, folder_of(item)),
             );
             Icon::Play.paint(
                 ui,
@@ -579,7 +579,7 @@ impl App {
                 ui,
                 repair_at,
                 &format!("repair{}", item.dir.display()),
-                self.t.repair,
+                &format!("{}: {}", self.t.repair, folder_of(item)),
             );
             let failed = item.failed.is_some()
                 || self
@@ -608,7 +608,7 @@ impl App {
                 ui,
                 folder,
                 &format!("folder{}", item.dir.display()),
-                self.t.open_folder,
+                &format!("{}: {}", self.t.open_folder, folder_of(item)),
             );
             Icon::Folder.paint(
                 ui,
@@ -869,6 +869,15 @@ pub(crate) fn steady_clicks(
         now.push(event);
     }
     (now, later)
+}
+
+/// The recording's folder name ("Recording 2026-11-25 18.17.28"): it tells apart the buttons of
+/// each recording for a screen reader or an agent.
+fn folder_of(item: &crate::app::Item) -> String {
+    item.dir
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| item.when.clone())
 }
 
 /// A clickable area with a name for screen readers and agents.

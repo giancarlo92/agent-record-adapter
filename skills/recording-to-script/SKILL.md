@@ -168,17 +168,17 @@ What `desktop-script.mjs` gives:
 | `task({ title, params }, body)` | Reads `--name value` (snake_case names also as `--kebab-case`), prints `--help` with each question, refuses missing values (exit 2), runs the body, prints `Step N (what) failed: why` (exit 1) or `Done` |
 | `step(n, what, fn)` | One numbered step; `--stop-before N` stops there and leaves the screen |
 | `confirm(question)` | Asks y/n in the terminal; `--yes` answers for the person |
-| `openApp(program, { title, image, args })` | Its window: the one already open when `image` (`dbeaver.exe`) has one, else `launch` it |
+| `openApp(program, { title, image, args })` | Its window: one already open with the whole `title`, else the new window `launch` opens (an app that keeps one window: the one it has) |
 | `openBrowser(url, { title, profile, browser })` | Chrome (or Edge) with a profile of the script's own and DevTools; closed when the task finishes (`--keep-open` keeps it) |
 | `findWindow(title, { app, pid })` | A window already open. `title` can be a list of the title's parts as recorded (`['Report.txt', 'Notepad']`): the window of `app` with the most of them wins, as the part naming a document changes |
-| `window.find(query)` | An element to act on, waiting for it. `query`: `nativeId`, `role`, `name`, `text`, `exact`, `within` (only inside an element whose name contains that text: a tab, a panel, a dialog), and `inDocument: true` (inside the document the window's title names now: a code editor with no name) |
+| `window.find(query)` | An element to act on, waiting for it. `query`: `nativeId` (with its `role`: ids an app numbers, such as a dialog's Save button 1, repeat on the items of its file list), `role`, `name`, `text`, `exact`, `within` (only inside an element whose name contains that text: a tab, a panel, a dialog), and `inDocument: true` (inside the document the window's title names now: a code editor with no name) |
 | `window.boundsOf(query)` | Where any element is on screen, also one you cannot act on (a panel) |
 | `window.waitForNew(query, before)` | Waits until a text that is only read differs from what it was (a status line an earlier run left) |
 | `window.read(query)` | The text of an element that is only read |
 | `window.has(query)` | The element if it is there now, else `null`: for a dialog that only sometimes appears |
 | `window.waitForText(text)` | Waits until the window shows it |
 | `window.menu(...path)` | A menu-bar command, without opening the menu |
-| `window.shortcut(keys)` | What pressing `keys` does (`'ctrl+return'`), through the menu item that shows them |
+| `window.shortcut(keys)` | What pressing `keys` does (`'ctrl+return'`), in the background: the menu item or button that shows them, else the keys to what has the focus in that window |
 | `window.chooseMenuItem(name)` | A menu item by name: in an open menu, in a classic menu bar (any submenu), or by opening each menu of the window's own menu bar in turn |
 | `element.paste()` | Ctrl+V: the clipboard's text added to what the field holds |
 | `window.write(query, text)` | Makes a document hold `text`: sets it when it takes a value, else types what it lacks at its end |
@@ -188,6 +188,9 @@ What `desktop-script.mjs` gives:
 | `window.screenshot(file)`, `window.currentTitle()` | A PNG of the window (even behind others); its title now |
 | `readClipboard()` | The text the app copied |
 | `element.click()`, `.setValue(v)`, `.clear()`, `.select(option)`, `.check()`, `.uncheck()`, `.fillSecret(name)`, `.value()`, `.is(state)`, `.bounds()` | The actions, each checked; where the element is |
+| `element.expand()`, `.collapse()` | Opens or closes a tree item (a click only selects it) |
+| `window.clickIn(query, dx, dy, { double })` | A click at a point with no element of its own inside a panel that has a name (a cell of a results grid inside its results tab), measured from the panel's corner, once the panel is there (it need not be something you can act on) |
+| `window.close()` | Closes the window as its Close button does (an app that asks to save shows its dialog) |
 | `run(...args)` | Any other agent-record command; returns `data` or throws |
 
 A desktop app driven through its menus, the way a task done in DBeaver goes (the connection is the one the app already has, so the script needs no login):

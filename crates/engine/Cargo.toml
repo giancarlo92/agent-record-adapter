@@ -11,6 +11,7 @@ license.workspace = true
 publish = false
 autotests = false
 autobins  = false
+build     = "build.rs"
 
 [dependencies]
 agent-desktop-core.workspace = true
@@ -34,6 +35,10 @@ windows-sys = { version = "0.61", features = [
   "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[lib]
+name = "agent_record_engine"
+path = "src/lib.rs"
 
 [[bin]]
 name = "agent-desktop"

@@ -24,6 +24,10 @@ git -C vendor/agent-browser log --oneline -1
 # to its not-supported default instead of reaching upstream's WindowsAdapter.
 Step 'Regenerate the adapter forwarding' { python scripts/gen_forwarding.py }
 
+# agent-browser inside agent-record: upstream's manifest under our name, and
+# our lock pinned to upstream's dependency versions where cargo allows.
+Step 'Sync the web engine with agent-browser' { python scripts/sync_web_engine.py --pin }
+
 # The engine reports upstream's version.
 $version = (Select-String -Path vendor/agent-desktop/Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
 (Get-Content crates/engine/Cargo.toml) -replace '^version = ".*"', "version = `"$version`"" |

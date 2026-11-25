@@ -20,7 +20,7 @@ fs.mkdirSync(vendor);
 const program = process.platform === 'win32'
   ? path.join(process.env.SystemRoot || 'C:\\Windows','System32', 'findstr.exe')
   : null;
-for (const name of ['agent-record.exe', 'agent-desktop.exe', 'agent-browser.exe', 'desktop-recorder.exe']) {
+for (const name of ['agent-record.exe', 'desktop-recorder.exe']) {
   if (program) fs.copyFileSync(program, path.join(vendor, name));
   else fs.writeFileSync(path.join(vendor, name), name);
 }
@@ -53,8 +53,9 @@ test('install sets up each chosen agent and keeps what was there', () => {
   const { home, options } = fakeHome();
   const lines = install(['claude-code', 'codex', 'cursor', 'vscode'], options);
   const where = layout(home);
-  assert.ok(fs.existsSync(where.exe), 'the front is copied');
-  assert.ok(fs.existsSync(where.engine), 'the engine is copied next to it');
+  assert.ok(fs.existsSync(where.exe), 'agent-record is copied');
+  assert.deepStrictEqual(fs.readdirSync(where.bin).filter((f) => f.endsWith('.exe')).sort(),
+    ['agent-record.exe', 'desktop-recorder.exe'], 'only the two programs: the engine and agent-browser are inside agent-record');
 
   const claude = JSON.parse(read(path.join(home, '.claude.json')));
   assert.equal(claude.theme, 'dark');
@@ -203,10 +204,10 @@ test('the agents CLIs get every argument intact, through npm .cmd scripts, witho
   const where = layout(homeWithSpace);
   assert.deepStrictEqual(calls.find((c) => c[0] === 'claude' && c[2] === 'add'),
     ['claude', 'mcp', 'add', SERVER, '--scope', 'user', '--env', `AGENT_DESKTOP_HOME=${where.state}`,
-      '--env', `AGENT_BROWSER_BIN=${where.browser}`, '--', where.exe, 'mcp']);
+      '--', where.exe, 'mcp']);
   assert.deepStrictEqual(calls.find((c) => c[0] === 'codex' && c[2] === 'add'),
     ['codex', 'mcp', 'add', SERVER, '--env', `AGENT_DESKTOP_HOME=${where.state}`,
-      '--env', `AGENT_BROWSER_BIN=${where.browser}`, '--', where.exe, 'mcp']);
+      '--', where.exe, 'mcp']);
   assert.ok(!/DEP0190|DeprecationWarning/.test(stderr || ''), stderr);
 });
 
@@ -271,16 +272,19 @@ test('the command line with --home keeps the Start menu entry inside that home',
   assert.equal(after, before, 'the real Start menu entry is not touched');
 });
 
-test('the package carries agent-browser: it is copied next to agent-record and the MCP server is told where', () => {
+test('the engine and agent-browser an earlier build installed as programs are removed: agent-record carries them', () => {
   const { server } = require('../lib/install');
   const { home, options } = fakeHome();
-  install(['claude-code'], options);
   const where = layout(home);
-  assert.strictEqual(where.browser, path.join(where.bin, 'agent-browser.exe'));
-  assert.ok(fs.existsSync(where.browser), 'agent-browser.exe is copied');
-  assert.deepEqual(server(where).env, { AGENT_DESKTOP_HOME: where.state, AGENT_BROWSER_BIN: where.browser });
+  fs.mkdirSync(where.bin, { recursive: true });
+  fs.writeFileSync(path.join(where.bin, 'agent-desktop.exe'), 'old engine');
+  fs.writeFileSync(path.join(where.bin, 'agent-browser.exe'), 'old browser');
+  install(['claude-code'], options);
+  assert.ok(!fs.existsSync(path.join(where.bin, 'agent-desktop.exe')), 'the old engine is removed');
+  assert.ok(!fs.existsSync(path.join(where.bin, 'agent-browser.exe')), 'the old agent-browser is removed');
+  assert.deepEqual(server(where).env, { AGENT_DESKTOP_HOME: where.state });
   const claude = JSON.parse(read(path.join(home, '.claude.json')));
-  assert.equal(claude.mcpServers[SERVER].env.AGENT_BROWSER_BIN, where.browser);
+  assert.equal(claude.mcpServers[SERVER].env.AGENT_BROWSER_BIN, undefined);
 });
 
 test('nothing is installed from another package: no npm folder, and the one an earlier build made is removed', () => {
@@ -317,7 +321,7 @@ test('an earlier desktop-recorder install is replaced in place, keeping saved pa
   assert.strictEqual(where.root, path.join(home, '.desktop-recorder-mcp'));
   fs.mkdirSync(where.bin, { recursive: true });
   fs.mkdirSync(path.join(where.state, 'recordings'), { recursive: true });
-  fs.writeFileSync(where.engine, 'old engine');
+  fs.writeFileSync(where.exe, 'old agent-record');
   fs.writeFileSync(path.join(where.root, 'secrets.json'), '[{"name":"x"}]');
   fs.writeFileSync(path.join(where.root, 'recorder.json'), '{"video":true}');
   fs.writeFileSync(path.join(where.state, 'recordings', 'r.json'), '{}');
@@ -326,7 +330,7 @@ test('an earlier desktop-recorder install is replaced in place, keeping saved pa
   fs.writeFileSync(path.join(oldSkill, 'SKILL.md'), 'old');
   fs.writeFileSync(path.join(oldSkill, '.desktop-recorder-mcp'), '');
   install(['claude-code'], options);
-  assert.notStrictEqual(read(where.engine), 'old engine');
+  assert.notStrictEqual(read(where.exe), 'old agent-record');
   assert.strictEqual(read(path.join(where.root, 'secrets.json')), '[{"name":"x"}]');
   assert.strictEqual(read(path.join(where.root, 'recorder.json')), '{"video":true}');
   assert.ok(fs.existsSync(path.join(where.state, 'recordings', 'r.json')));
@@ -352,7 +356,7 @@ test('OpenCode is set up in its own format, and Windsurf is no longer offered', 
   assert.ok(data.mcp.servers.other);
   assert.deepStrictEqual(data.mcp.servers[SERVER], {
     type: 'local', command: [where.exe, 'mcp'],
-    environment: { AGENT_DESKTOP_HOME: where.state, AGENT_BROWSER_BIN: where.browser },
+    environment: { AGENT_DESKTOP_HOME: where.state },
   });
   assert.ok(fs.existsSync(path.join(dir, 'skills', 'desktop-recording', 'SKILL.md')), 'OpenCode gets the skills');
   assert.ok(status(options).some((l) => /^OpenCode: found, MCP set up, skills installed/.test(l)));

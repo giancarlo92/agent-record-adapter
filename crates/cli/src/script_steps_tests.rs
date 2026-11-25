@@ -196,3 +196,52 @@ subprocess.run(["agent-record", "type", "w-123", sys.argv[1]])
     );
     assert_eq!(data["unsupported"][0]["line"], 4);
 }
+
+const AGENT_TASK: &str = r#"
+import { task } from './desktop-script.mjs';
+
+await task({
+  title: 'Recording',
+  params: {
+  },
+}, async ({ params, step, openBrowser, openApp, findWindow, confirm }) => {
+  const windows = {};
+  const win = async (id, parts, app) => (windows[id] ??= await findWindow(parts, { app }));
+  await step(1, "Open dbeaver.exe", async () => {
+    windows["w-1"] = await openApp("C:\DB\dbeaver.exe", { title: ["DBeaver 26.1.4", "<PRV Staging> Script-30"], image: "dbeaver.exe" });
+  });
+  await step(2, "Expand \"PRV Staging\"", async () => {
+    await (await (await win("w-1", ["DBeaver 26.1.4", "<PRV Staging> Script-30"], "dbeaver.exe")).find({ role: "treeitem", name: "PRV Staging", exact: true })).expand();
+  });
+  await step(3, "Click inside \"alumno 1\" (something with no name)", async () => {
+    await (await win("w-1", ["DBeaver 26.1.4", "<PRV Staging> Script-30"], "dbeaver.exe")).clickIn({ role: "tablist", name: "alumno 1", exact: true }, 155, 115);
+  });
+  await step(4, "Close the window \"dbeaver\"", async () => {
+    await (await win("w-1", ["DBeaver 26.1.4", "<PRV Staging> Script-30"], "dbeaver.exe")).close();
+  });
+});
+"#;
+
+#[test]
+fn an_agents_task_keeps_its_expand_click_inside_and_close_steps() {
+    let data = steps("script.mjs", AGENT_TASK);
+    assert_eq!(data["unsupported"], json!([]));
+    let kinds: Vec<&str> = data["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["actions"].as_array().unwrap().iter())
+        .map(|a| a["kind"].as_str().unwrap())
+        .filter(|kind| *kind != "find_window")
+        .collect();
+    assert_eq!(kinds, ["open_app", "expand", "click_in", "close"]);
+    let inside = &data["steps"][2]["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["kind"] == "click_in")
+        .unwrap()
+        .clone();
+    assert_eq!(inside["dx"], json!(155));
+    assert_eq!(inside["target"]["name"], json!({"text": "alumno 1"}));
+}

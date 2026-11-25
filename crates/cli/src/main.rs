@@ -6,9 +6,10 @@
 //!   `type w-<id>` run here, in process, with our background adapter;
 //! - `browser ...` runs agent-browser against the dedicated background Chrome;
 //! - `mcp` serves all of them as one MCP server (see `mcp.rs`);
-//! - every other command is agent-desktop's, run by the engine
-//!   (`agent-desktop.exe` next to this program: upstream's own CLI built with
-//!   our adapter) with the same arguments, output and exit code.
+//! - every other command is agent-desktop's, run by the engine (upstream's
+//!   own CLI built with our adapter, carried inside this executable and run
+//!   in a process of its own, see `parts.rs`) with the same arguments, output
+//!   and exit code.
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
 mod args;
@@ -19,6 +20,7 @@ mod engine;
 mod labels;
 mod launch_cdp;
 mod mcp;
+mod parts;
 mod run;
 mod skills;
 mod stroke_args;
@@ -28,6 +30,11 @@ use std::process::ExitCode;
 use clap::{CommandFactory, FromArgMatches};
 
 fn main() -> ExitCode {
+    // This executable started as the engine or as agent-browser (see parts.rs).
+    if let Some(part) = parts::requested() {
+        return parts::run(part);
+    }
+    agent_record_browser::locate::set_embedded(|| parts::command(parts::Part::Browser).ok());
     // With a work desktop set, the whole command runs there (and so does
     // every engine or browser process it starts).
     #[cfg(target_os = "windows")]

@@ -2,40 +2,45 @@
 'use strict';
 
 // Puts the programs, the skills and the licences into the package before packing it:
-// - agent-record.exe (the front) and agent-desktop.exe (the engine) from this repository's
-//   release build (cargo build --release at the repository root);
-// - agent-browser.exe built from the unmodified agent-browser submodule, into a target folder of
-//   our own (cargo build --release --manifest-path vendor/agent-browser/cli/Cargo.toml
-//   --target-dir target/agent-browser), so nothing is installed from npm;
-// - desktop-recorder.exe from apps/recorder (cargo build --release in that folder);
+// - agent-record.exe from this repository's release build (cargo build --release -p agent-record
+//   at the repository root). It carries inside the agent-desktop engine (with our adapter) and
+//   agent-browser, both built from their unmodified submodules under vendor/, so nothing is
+//   installed from npm and there is no other program of theirs to ship;
+// - desktop-recorder.exe from apps/recorder, built here with the SHA-256 of that agent-record.exe
+//   (AGENT_RECORD_SHA256), so the app refuses an agent-record.exe that was changed;
 // - our skills from skills/, and the official agent-desktop and agent-browser skills copied
 //   unmodified from the submodules under vendor/;
 // - the bundled agent-browser version, taken from the submodule.
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 
 const pkg = path.join(__dirname, '..');
 const repo = path.join(pkg, '..', '..');
 const target = process.env.CARGO_TARGET_DIR || path.join(repo, 'target');
-const appTarget = process.env.RECORDER_TARGET_DIR || path.join(repo, 'apps', 'recorder', 'target');
+const appDir = path.join(repo, 'apps', 'recorder');
+const appTarget = process.env.RECORDER_TARGET_DIR || path.join(appDir, 'target');
 const { OFFICIAL_SKILLS, OUR_SKILLS } = require('../lib/install');
 
-const programs = [
-  [path.join(target, 'release', 'agent-record.exe'), 'cargo build --release -p agent-record'],
-  [path.join(target, 'release', 'agent-desktop.exe'), 'cargo build --release -p agent-record-engine'],
-  [path.join(target, 'agent-browser', 'release', 'agent-browser.exe'),
-    'cargo build --release --manifest-path vendor/agent-browser/cli/Cargo.toml --target-dir target/agent-browser'],
-  [path.join(appTarget, 'release', 'desktop-recorder.exe'), 'cargo build --release in apps/recorder'],
-];
-for (const [exe, how] of programs) {
-  if (!fs.existsSync(exe)) {
-    console.error(`No release build at ${exe}: run ${how} first`);
-    process.exit(1);
-  }
+const front = path.join(target, 'release', 'agent-record.exe');
+if (!fs.existsSync(front)) {
+  console.error(`No release build at ${front}: run cargo build --release -p agent-record first`);
+  process.exit(1);
 }
-fs.mkdirSync(path.join(pkg, 'vendor'), { recursive: true });
-for (const [exe] of programs) fs.copyFileSync(exe, path.join(pkg, 'vendor', path.basename(exe)));
+const sha256 = crypto.createHash('sha256').update(fs.readFileSync(front)).digest('hex');
+execFileSync('cargo', ['build', '--release'], {
+  cwd: appDir,
+  stdio: 'inherit',
+  env: { ...process.env, AGENT_RECORD_SHA256: sha256, CARGO_TARGET_DIR: appTarget },
+});
+const programs = [front, path.join(appTarget, 'release', 'desktop-recorder.exe')];
+const vendorDir = path.join(pkg, 'vendor');
+fs.mkdirSync(vendorDir, { recursive: true });
+// Programs an earlier build of the package shipped apart.
+for (const old of ['agent-desktop.exe', 'agent-browser.exe']) fs.rmSync(path.join(vendorDir, old), { force: true });
+for (const exe of programs) fs.copyFileSync(exe, path.join(vendorDir, path.basename(exe)));
 
 function copyDir(from, to) {
   fs.mkdirSync(to, { recursive: true });
@@ -66,4 +71,4 @@ fs.writeFileSync(manifest, JSON.stringify(data, null, 2) + '\n');
 for (const file of ['LICENSE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt']) {
   fs.copyFileSync(path.join(repo, file), path.join(pkg, file));
 }
-console.log(`vendor/ (${programs.length} programs), skills/ and licences ready; agent-browser ${data.bundled['agent-browser']}`);
+console.log(`vendor/ (${programs.length} programs), skills/ and licences ready; agent-browser ${data.bundled['agent-browser']} inside agent-record`);

@@ -81,22 +81,22 @@ pub fn run_with(args: Vec<String>, options: &RunOptions) -> ExitCode {
     if args.first().map(String::as_str) == Some(SERVE_PROXY_FLAG) {
         return serve_proxy_process(&args[1..]);
     }
-    let Some(binary) = locate::find_agent_browser() else {
+    if locate::browser_command().is_none() {
         eprintln!(
-            "agent-record browser: agent-browser was not found next to agent-record. Install again with \
+            "agent-record browser: agent-browser was not found. Install again with \
 `npx desktop-recorder-mcp`, or set AGENT_RECORD_BROWSER_BIN to its executable."
         );
         return ExitCode::from(127);
-    };
+    }
     let (target, args) = split_target(args);
     if passes_through(&args) {
-        return exec(&binary, &args);
+        return exec(&args);
     }
     match prepare(&target, options) {
         Ok(proxy_port) => {
             let mut full = vec!["--cdp".to_owned(), proxy_port.to_string()];
             full.extend(args);
-            exec(&binary, &full)
+            exec(&full)
         }
         Err(message) => {
             eprintln!("agent-record browser: {message}");
@@ -114,11 +114,10 @@ pub fn run_with(args: Vec<String>, options: &RunOptions) -> ExitCode {
 /// proxy on that port before each web tool call that needs a page.
 pub fn mcp_command() -> Result<(Command, LazyBrowser), String> {
     std_handles_not_inherited();
-    let binary = locate::find_agent_browser().ok_or_else(|| {
+    let mut command = locate::browser_command().ok_or_else(|| {
         "agent-browser was not found; install it or set AGENT_RECORD_BROWSER_BIN".to_owned()
     })?;
     let proxy_port = proxy_port_for(chrome::chrome_port())?;
-    let mut command = locate::command_for(&binary);
     command
         .arg("mcp")
         .env("AGENT_BROWSER_CDP", proxy_port.to_string());
@@ -262,8 +261,11 @@ pub fn passes_through(args: &[String]) -> bool {
 /// given; with ours, a caller reading our output (a pipe) would wait for that
 /// daemon to end. So this returns when agent-browser itself exits, whatever
 /// still holds its pipes.
-fn exec(binary: &std::path::Path, args: &[String]) -> ExitCode {
-    let spawned = locate::command_for(binary)
+fn exec(args: &[String]) -> ExitCode {
+    let Some(mut command) = locate::browser_command() else {
+        return ExitCode::from(127);
+    };
+    let spawned = command
         .args(args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
@@ -308,10 +310,7 @@ fn exec(binary: &std::path::Path, args: &[String]) -> ExitCode {
                 .unwrap_or(1),
         ),
         Err(error) => {
-            eprintln!(
-                "agent-record browser: cannot run {}: {error}",
-                binary.display()
-            );
+            eprintln!("agent-record browser: cannot run agent-browser: {error}");
             ExitCode::FAILURE
         }
     }

@@ -6,31 +6,23 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 const ENGINE_ENV: &str = "AGENT_RECORD_ENGINE";
-#[cfg(windows)]
-const ENGINE_FILE: &str = "agent-desktop.exe";
-#[cfg(not(windows))]
-const ENGINE_FILE: &str = "agent-desktop";
 
-/// Where the engine is: `AGENT_RECORD_ENGINE`, else next to this program.
+/// The engine's executable: `AGENT_RECORD_ENGINE` when set (a separate
+/// build, for development and tests), else agent-record itself, which
+/// carries the engine inside (see `parts.rs`).
 pub(crate) fn path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os(ENGINE_ENV) {
         return Ok(PathBuf::from(path));
     }
-    let exe =
-        std::env::current_exe().map_err(|error| format!("Cannot locate agent-record: {error}"))?;
-    let beside = exe.with_file_name(ENGINE_FILE);
-    if beside.is_file() {
-        return Ok(beside);
-    }
-    Err(format!(
-        "The engine {ENGINE_FILE} is not next to {} (set {ENGINE_ENV} to its path)",
-        exe.display()
-    ))
+    std::env::current_exe().map_err(|error| format!("Cannot locate agent-record: {error}"))
 }
 
 /// A command for the engine with these arguments.
 pub(crate) fn command(args: &[String]) -> Result<Command, String> {
-    let mut command = Command::new(path()?);
+    let mut command = match std::env::var_os(ENGINE_ENV) {
+        Some(path) => Command::new(path),
+        None => crate::parts::command(crate::parts::Part::Engine)?,
+    };
     command.args(args);
     Ok(command)
 }

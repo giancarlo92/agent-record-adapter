@@ -61,6 +61,62 @@ pub fn agent_desktop() -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
+/// agent-record, checked to be the one this app was packaged with: a release
+/// package builds the app with `AGENT_RECORD_SHA256` (the hash of the
+/// agent-record.exe it ships), so a changed agent-record.exe is refused
+/// instead of run. `AGENT_RECORD_BIN` (development, tests) is not checked.
+pub fn checked_agent_record() -> Result<PathBuf, String> {
+    let program =
+        agent_desktop().ok_or("agent-record was not found: run npx desktop-recorder-mcp")?;
+    let Some(expected) = option_env!("AGENT_RECORD_SHA256") else {
+        return Ok(program);
+    };
+    if std::env::var_os("AGENT_RECORD_BIN").is_some() {
+        return Ok(program);
+    }
+    if same_hash(&program, expected) {
+        Ok(program)
+    } else {
+        Err(format!(
+            "{} is not the agent-record this Desktop Recorder was installed with, so it was not run: install again with npx desktop-recorder-mcp",
+            program.display()
+        ))
+    }
+}
+
+/// Whether the file's SHA-256 is `expected` (hex); remembered while the file
+/// keeps its size and time.
+fn same_hash(file: &Path, expected: &str) -> bool {
+    use sha2::{Digest, Sha256};
+    type Checked = Option<(PathBuf, u64, std::time::SystemTime, bool)>;
+    static CHECKED: std::sync::Mutex<Checked> = std::sync::Mutex::new(None);
+    let Ok(meta) = std::fs::metadata(file) else {
+        return false;
+    };
+    let Ok(modified) = meta.modified() else {
+        return false;
+    };
+    let mut checked = CHECKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((path, len, time, ok)) = checked.as_ref()
+        && path == file
+        && *len == meta.len()
+        && *time == modified
+    {
+        return *ok;
+    }
+    let ok = std::fs::read(file)
+        .map(|bytes| {
+            let digest = Sha256::digest(&bytes);
+            let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+            hex.eq_ignore_ascii_case(expected.trim())
+        })
+        .unwrap_or(false);
+    *checked = Some((file.to_path_buf(), meta.len(), modified, ok));
+    ok
+}
+
 fn command(program: &Path) -> Command {
     let mut command = Command::new(program);
     let state = home().join(PRODUCT_DIR).join("state");
@@ -74,8 +130,7 @@ fn command(program: &Path) -> Command {
 
 /// One agent-record command: its `data`, or the error's message.
 pub fn run(args: &[String]) -> Result<Value, String> {
-    let program =
-        agent_desktop().ok_or("agent-record was not found: run npx desktop-recorder-mcp")?;
+    let program = checked_agent_record()?;
     let output = command(&program)
         .args(args)
         // A recording started from here leaves the bar's own clicks out.
@@ -203,8 +258,15 @@ pub fn run_script(dir: &Path, script: &str, values: Vec<String>, lines: Sender<S
         let node = if cfg!(windows) { "node.exe" } else { "node" };
         let mut command = command(Path::new(node));
         // The script uses this same agent-record, not whatever else is on PATH.
-        if let Some(program) = agent_desktop() {
-            command.env("AGENT_RECORD_BIN", program);
+        match checked_agent_record() {
+            Ok(program) => {
+                command.env("AGENT_RECORD_BIN", program);
+            }
+            Err(message) => {
+                let _ = lines.send(message);
+                let _ = lines.send("\u{0}1".to_owned());
+                return;
+            }
         }
         command
             .current_dir(&dir)

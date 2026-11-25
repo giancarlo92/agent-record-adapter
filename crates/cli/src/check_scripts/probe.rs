@@ -87,6 +87,16 @@ pub(crate) struct Programs {
 
 /// Runs a program with no input and returns (success, stdout), or `None`
 /// when it could not start or did not finish in time.
+/// The engine with these arguments: the one agent-record carries (or the one
+/// `AGENT_RECORD_ENGINE` names); `engine` when neither can be made.
+fn engine_command(engine: &std::path::Path, args: &[String]) -> Command {
+    crate::engine::command(args).unwrap_or_else(|_| {
+        let mut command = Command::new(engine);
+        command.args(args);
+        command
+    })
+}
+
 pub(crate) fn output(command: &mut Command, limit: Duration) -> Option<(bool, String)> {
     let mut child = command
         .stdin(Stdio::null())
@@ -129,13 +139,9 @@ impl Programs {
         let front = std::env::current_exe()
             .map_err(|error| format!("Cannot locate agent-record: {error}"))?;
         let engine = crate::engine::path()?;
-        let browser = Some(front.with_file_name(if cfg!(windows) {
-            "agent-browser.exe"
-        } else {
-            "agent-browser"
-        }))
-        .filter(|path| path.is_file());
-        let (ok, help) = output(Command::new(&engine).arg("--help"), Duration::from_secs(20))
+        // agent-browser is carried inside agent-record (or set apart for development).
+        let browser = agent_record_browser::locate::browser_command().map(|_| front.clone());
+        let (ok, help) = output(&mut engine_command(&engine, &["--help".to_string()]), Duration::from_secs(20))
             .ok_or_else(|| format!("The engine {} did not answer", engine.display()))?;
         if !ok {
             return Err(format!(
@@ -212,10 +218,7 @@ impl Programs {
         let mut argv = args.to_vec();
         argv.push("--help".into());
         if !self.probes.contains_key(&argv) {
-            let answer = output(
-                Command::new(&self.engine).args(&argv),
-                Duration::from_secs(20),
-            );
+            let answer = output(&mut engine_command(&self.engine, &argv), Duration::from_secs(20));
             let Some(answer) = answer else {
                 return Probe::NoAnswer("the engine did not answer".into());
             };
@@ -370,11 +373,9 @@ impl Programs {
         if let Some(found) = self.browser_help.get(command) {
             return found.clone();
         }
-        let browser = self.browser.clone()?;
-        let answer = output(
-            Command::new(&browser).args([command, "--help"]),
-            Duration::from_secs(20),
-        );
+        self.browser.as_ref()?;
+        let mut browser = agent_record_browser::locate::browser_command()?;
+        let answer = output(browser.args([command, "--help"]), Duration::from_secs(20));
         let help = answer.filter(|(ok, _)| *ok).map(|(_, text)| text);
         self.browser_help.insert(command.to_string(), help.clone());
         help
@@ -382,7 +383,7 @@ impl Programs {
 
     fn check_browser(&mut self, args: &[Arg]) -> Outcome {
         if self.browser.is_none() {
-            return Outcome::unchecked("agent-browser is not installed next to agent-record");
+            return Outcome::unchecked("agent-browser is not available to agent-record");
         }
         let mut at = 0;
         while let Some(Arg::Lit(flag)) = args.get(at) {
@@ -404,9 +405,8 @@ impl Programs {
             return Outcome::error(format!("`{command}` is not a command of agent-browser"));
         };
         if self.browser_global.is_none() {
-            let browser = self.browser.clone();
-            self.browser_global = browser
-                .and_then(|path| output(Command::new(path).arg("--help"), Duration::from_secs(20)))
+            self.browser_global = agent_record_browser::locate::browser_command()
+                .and_then(|mut browser| output(browser.arg("--help"), Duration::from_secs(20)))
                 .map(|(_, text)| text);
         }
         let global = self.browser_global.clone().unwrap_or_default();

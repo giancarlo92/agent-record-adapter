@@ -418,3 +418,107 @@ fn caret_keys_and_a_paste_followed_by_text_are_replayed_by_that_text() {
     );
     assert_eq!(steps.len(), 2);
 }
+
+#[test]
+fn an_agents_desktop_task_keeps_its_tree_menu_focus_and_close_steps() {
+    let main = serde_json::json!({ "id": "w-7", "app_name": "db.exe", "title": "DB 1.0 - <conn> Script-28",
+        "path": "C:/DB/db.exe", "bounds": { "x": -9.0, "y": -9.0, "width": 1938.0, "height": 1038.0 } });
+    let notes = serde_json::json!({ "id": "w-8", "app_name": "Notepad.exe", "title": "Untitled - Notepad",
+        "path": "C:/Notepad.exe", "bounds": { "x": 120.0, "y": 120.0, "width": 1440.0, "height": 711.0 } });
+    let window = serde_json::json!({ "role": "window", "name": "" });
+    let recording = [
+        desktop("click", main.clone(), serde_json::json!({ "role": "treeitem", "name": "PRV Staging" }), serde_json::json!({ "expand": true, "by": "agent" })),
+        desktop("click", main.clone(), serde_json::json!({ "role": "treeitem", "name": "prv" }), serde_json::json!({ "by": "agent" })),
+        desktop("click", main.clone(), serde_json::json!({ "role": "menuitem", "name": "New SQL script" }),
+            serde_json::json!({ "menu_path": ["SQL Editor", "New SQL script"], "by": "agent" })),
+        // An agent's click-at on a grid cell the app names as a group: the point it chose.
+        desktop("click", main.clone(), serde_json::json!({ "role": "group", "name": "1 at row 1" }),
+            serde_json::json!({ "point": { "x": 611, "y": 673 }, "window_point": { "x": 620, "y": 673 }, "by": "agent" })),
+        desktop("press", main.clone(), window.clone(), serde_json::json!({ "keys": "ctrl+a" })),
+        desktop("press", main.clone(), window.clone(), serde_json::json!({ "keys": "ctrl+shift+c" })),
+        // A person's click on the same kind of container, then a command key: the click gave the
+        // focus the keys act on.
+        desktop("click", main.clone(), serde_json::json!({ "role": "group", "name": "2 at row 2" }),
+            serde_json::json!({ "point": { "x": 611, "y": 698 } })),
+        desktop("press", main.clone(), window.clone(), serde_json::json!({ "keys": "ctrl+a" })),
+        // A click on a container that nothing follows in its window stays out.
+        desktop("click", main.clone(), serde_json::json!({ "role": "group", "name": "panel" }),
+            serde_json::json!({ "point": { "x": 50, "y": 50 } })),
+        desktop("press", notes.clone(), serde_json::json!({ "role": "document", "name": "Text editor" }), serde_json::json!({ "keys": "ctrl+a" })),
+        desktop("close", notes, window.clone(), serde_json::json!({ "by": "agent" })),
+        desktop("close", main, window, serde_json::json!({ "by": "agent" })),
+    ]
+    .join("\n");
+    let steps = parse(&recording);
+    let actions: Vec<&Action> = steps.iter().map(|s| &s.action).collect();
+    assert!(matches!(actions[0], Action::OpenApp { .. }));
+    assert!(
+        matches!(actions[1], Action::Expand { field, open: true, .. } if field == "PRV Staging")
+    );
+    assert!(matches!(actions[2], Action::Click { field, .. } if field == "prv"));
+    assert!(
+        matches!(actions[3], Action::Menu { path } if path == &["SQL Editor", "New SQL script"])
+    );
+    assert!(matches!(
+        actions[4],
+        Action::ClickAt {
+            dx: 620,
+            dy: 682,
+            double: false
+        }
+    ));
+    assert!(matches!(actions[5], Action::Key { keys } if keys == "ctrl+a"));
+    assert!(matches!(actions[6], Action::Key { keys } if keys == "ctrl+shift+c"));
+    assert!(matches!(
+        actions[7],
+        Action::ClickAt {
+            dx: 620,
+            dy: 707,
+            ..
+        }
+    ));
+    assert!(matches!(actions[8], Action::Key { keys } if keys == "ctrl+a"));
+    // Ctrl+A in a field only selects what the typing replaces.
+    assert!(matches!(actions[9], Action::OpenApp { path } if path == "C:/Notepad.exe"));
+    assert!(matches!(actions[10], Action::Close));
+    assert!(matches!(actions[11], Action::Close));
+    assert_eq!(steps.len(), 12);
+}
+
+#[test]
+fn an_app_installed_as_a_package_is_opened_by_its_name() {
+    let notes = serde_json::json!({ "id": "w-8", "app_name": "Notepad.exe", "title": "Untitled - Notepad",
+        "path": r"C:\Program Files\WindowsApps\Microsoft.WindowsNotepad_11.2609.11.0_x64__8wekyb3d8bbwe\Notepad\Notepad.exe" });
+    let recording = desktop(
+        "press",
+        notes,
+        serde_json::json!({ "role": "window", "name": "" }),
+        serde_json::json!({ "keys": "ctrl+v" }),
+    );
+    let steps = parse(&recording);
+    assert!(matches!(&steps[0].action, Action::OpenApp { path } if path == "Notepad"));
+}
+
+#[test]
+fn a_point_inside_a_named_panel_is_clicked_inside_that_panel() {
+    let main = serde_json::json!({ "id": "w-7", "app_name": "db.exe", "title": "DB 1.0 - <conn> Script-28",
+        "path": "C:/DB/db.exe", "bounds": { "x": -9.0, "y": -9.0, "width": 1938.0, "height": 1038.0 } });
+    let cell =
+        serde_json::json!({ "role": "group", "name": "1,762,621 at row 1 column idAlumno number" });
+    let ancestors = serde_json::json!([
+        { "role": "group", "name": "", "bounds": { "x": 492.0, "y": 627.0, "width": 1390.0, "height": 313.0 } },
+        { "role": "tablist", "name": "alumno 1", "bounds": { "x": 456.0, "y": 558.0, "width": 1463.0, "height": 427.0 } },
+    ]);
+    let recording = desktop(
+        "click",
+        main,
+        cell,
+        serde_json::json!({
+        "point": { "x": 611, "y": 673 }, "window_point": { "x": 620, "y": 673 }, "ancestors": ancestors }),
+    );
+    let steps = parse(&recording);
+    assert!(
+        matches!(&steps[1].action, Action::ClickIn { at, dx: 155, dy: 115, double: false, .. }
+        if at.name.as_deref() == Some("alumno 1") && at.role.as_deref() == Some("tablist"))
+    );
+}

@@ -2,7 +2,7 @@
 # Agent Record Adapter: one product made of the unmodified vercel-labs
 # agent-desktop and agent-browser (git submodules under vendor/) plus our layer.
 [workspace]
-members  = ["crates/windows-adapter", "crates/engine", "crates/browser", "crates/record", "crates/cli"]
+members  = ["crates/windows-adapter", "crates/engine", "crates/browser", "crates/record", "crates/cli", "crates/web-engine/cli"]
 exclude  = ["vendor", "apps/recorder"]
 resolver = "2"
 
@@ -45,12 +45,28 @@ collapsible_if         = "allow"
 print_stdout           = "allow"
 print_stderr           = "allow"
 
+# One executable carries agent-desktop (built "z" with panic "abort" upstream)
+# and agent-browser (opt-level 3 with unwinding upstream). Unwinding for all:
+# agent-browser's daemon relies on a panicking task not ending the process.
+# The web engine and its image libraries keep upstream's speed.
 [profile.release]
 opt-level     = "z"
 lto           = true
 codegen-units = 1
 strip         = true
-panic         = "abort"
+panic         = "unwind"
 
 [profile.release.package.agent-desktop-core]
+opt-level = 3
+
+[profile.release.package.agent-record-web-engine]
+opt-level = 3
+
+[profile.release.package.image]
+opt-level = 3
+
+[profile.release.package.png]
+opt-level = 3
+
+[profile.release.package.tokio]
 opt-level = 3

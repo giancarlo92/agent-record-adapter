@@ -613,6 +613,8 @@ impl<'s, 'a> Recorder<'s, 'a> {
             Some("select") => "select",
             Some("press") => "press",
             Some("scroll") => "scroll",
+            // `close-window`: a window the agent closed.
+            Some("close") => "close",
             // A page an agent drove through agent-browser (the DevTools proxy).
             Some("navigate") => "navigate",
             Some("upload") => "upload",

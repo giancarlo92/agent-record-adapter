@@ -27,8 +27,8 @@ Agent Record Adapter is not a fork. The official vercel-labs agent-desktop and a
 | Part | What it is | Where |
 |---|---|---|
 | `agent-record` | The CLI agents and scripts run: every agent-desktop command with the same syntax and answers, plus `record`, `secret`, `stroke`, `menu`, `click-at`, `navigate`, `press --window-id`, `type w-<id>` and `browser` (agent-browser) | `%USERPROFILE%\.desktop-recorder-mcp\bin\agent-record.exe` once installed |
-| Engine | The official agent-desktop, built from its unmodified sources with our background adapter; `agent-record` runs agent-desktop's own commands through it | `%USERPROFILE%\.desktop-recorder-mcp\bin\agent-desktop.exe` |
-| agent-browser | The official vercel-labs agent-browser, built from its unmodified sources and shipped inside this package, for web pages in a browser with DevTools (`agent-record browser ...`) | `%USERPROFILE%\.desktop-recorder-mcp\bin\agent-browser.exe` |
+| Engine | The official agent-desktop, built from its unmodified sources with our background adapter; `agent-record` runs agent-desktop's own commands through it | Inside `agent-record.exe` |
+| agent-browser | The official vercel-labs agent-browser, built from its unmodified sources, for web pages in a browser with DevTools (`agent-record browser ...`) | Inside `agent-record.exe` |
 | MCP server | `agent-record mcp`: every command as an MCP tool for an AI agent | Registered in each agent by the installer under the name `desktop-recorder` |
 | Skills | The official `agent-desktop`, `agent-desktop-windows` and `agent-browser`, unmodified, and ours: `agent-record-background`, `desktop-recording`, `recording-to-script`, `script-repair` | Copied into Claude Code, Codex and OpenCode; served to every agent by `desktop_skills_get` |
 | Desktop Recorder | A small floating bar that records a task and plays it again, without AI | `%USERPROFILE%\.desktop-recorder-mcp\bin\desktop-recorder.exe`, Start menu > Desktop Recorder |
@@ -70,7 +70,7 @@ Agents that are open while it installs keep the previous version until they rest
 
 What it writes:
 
-- `%USERPROFILE%\.desktop-recorder-mcp\bin`: `agent-record.exe` (the front), `agent-desktop.exe` (the engine), `agent-browser.exe`, `desktop-recorder.exe`, `version.txt`; `%USERPROFILE%\.desktop-recorder-mcp\secrets.json` (the names of saved passwords, never their values) and `recorder.json` (the app's settings), kept by every install and uninstall;
+- `%USERPROFILE%\.desktop-recorder-mcp\bin`: `agent-record.exe` (with the engine and agent-browser inside), `desktop-recorder.exe`, `version.txt` (only you, SYSTEM and Administrators can change this folder); `%USERPROFILE%\.desktop-recorder-mcp\secrets.json` (the names of saved passwords, never their values) and `recorder.json` (the app's settings), kept by every install and uninstall;
 - `%USERPROFILE%\.desktop-recorder-mcp\state`: private state of the MCP server (refs, recordings). It stays private: do not share it;
 - each agent's configuration, with a backup next to it (`.bak-desktop-recorder-mcp`);
 - a Start menu entry "Desktop Recorder".
@@ -105,7 +105,7 @@ Desktop Recorder asks npm for the latest version at start and every six hours. S
 
 ### Publish (the maintainer)
 
-In `packages/desktop-recorder-mcp`: build the programs first (`cargo build --release` at the repository root, and in `apps/recorder`), then `node scripts/prepare.js` (copies `agent-record.exe`, `agent-desktop.exe`, `desktop-recorder.exe`, our skills and the official ones into the package, and pins agent-browser to the submodule's version), then `npm run release` (publishes and waits until the version can be downloaded). npm asks for 2FA in the browser. Run `npx desktop-recorder-mcp@<version>` from another folder, not from the package's own.
+In `packages/desktop-recorder-mcp`: build agent-record first (`cargo build --release -p agent-record` at the repository root), then `node scripts/prepare.js` (copies `agent-record.exe`, builds `desktop-recorder.exe` with its SHA-256, copies our skills and the official ones into the package, and records the agent-browser version inside), then `npm run release` (publishes and waits until the version can be downloaded). npm asks for 2FA in the browser. Run `npx desktop-recorder-mcp@<version>` from another folder, not from the package's own.
 
 ---
 
