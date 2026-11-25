@@ -70,10 +70,12 @@ Agents that are open while it installs keep the previous version until they rest
 
 What it writes:
 
-- `%USERPROFILE%\.desktop-recorder-mcp\bin`: `agent-record.exe` (with the engine and agent-browser inside), `desktop-recorder.exe`, `version.txt` (only you, SYSTEM and Administrators can change this folder); `%USERPROFILE%\.desktop-recorder-mcp\secrets.json` (the names of saved passwords, never their values) and `recorder.json` (the app's settings), kept by every install and uninstall;
+- `%USERPROFILE%\.desktop-recorder-mcp\bin`: `agent-record.exe` (with the engine and agent-browser inside), `desktop-recorder.exe`, `version.txt` (only you, SYSTEM and Administrators can change this folder); `%USERPROFILE%\.desktop-recorder-mcp\secrets.json` (the names of saved passwords, never their values) and `recorder.json` (the app's settings), kept by every install;
 - `%USERPROFILE%\.desktop-recorder-mcp\state`: private state of the MCP server (refs, recordings). It stays private: do not share it;
 - each agent's configuration, with a backup next to it (`.bak-desktop-recorder-mcp`);
 - a Start menu entry "Desktop Recorder".
+
+Uninstalling removes all of it, after showing the list and asking: it stops its programs that still run (an agent's MCP server, the dedicated browser, Desktop Recorder), removes the MCP server and the skills from every agent and the backups of their configuration, deletes the saved passwords from Windows' Credential Manager, the folders above, the dedicated browsers' profiles (`%LOCALAPPDATA%\DesktopRecorder`), the recordings in Desktop Recorder's own folder (`Documents\Desktop Recorder`), agent-desktop's and agent-browser's state (`~\.agent-desktop`, `~\.agent-browser`, kept when the official programs are installed too), the Start menu entry and npx's copy of the package. Recordings in a folder you picked in the app, and scripts you saved anywhere else, stay. `uninstall --agents claude-code` only removes it from those agents; `--yes` does not ask; `--dry-run` only lists.
 
 ### Other installer commands
 

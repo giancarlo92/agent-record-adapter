@@ -4,14 +4,14 @@
 
 // npx desktop-recorder-mcp            install: pick your agents from a list
 // npx desktop-recorder-mcp status     what is installed, and where
-// npx desktop-recorder-mcp uninstall  remove it from your agents
+// npx desktop-recorder-mcp uninstall  remove everything it put on this computer (--agents: only from those agents)
 // npx desktop-recorder-mcp app        open Desktop Recorder (record a task, play it again)
 // npx desktop-recorder-mcp update     this version, for the agents already set up (Desktop Recorder runs it)
 
 const os = require('os');
 const path = require('path');
 const { agents } = require('./lib/agents');
-const { install, installedAgents, uninstall, status, layout } = require('./lib/install');
+const { install, installedAgents, uninstall, removeEverything, plan, status, layout } = require('./lib/install');
 const { multiselect, confirm } = require('./lib/prompt');
 
 const HELP = `desktop-recorder-mcp: Agent Record for your AI agents, in one package: agent-desktop and agent-browser
@@ -21,7 +21,7 @@ const HELP = `desktop-recorder-mcp: Agent Record for your AI agents, in one pack
 Usage:
   npx desktop-recorder-mcp [install] [options]   install and set up the agents you pick
   npx desktop-recorder-mcp status                 what is installed, and where
-  npx desktop-recorder-mcp uninstall [options]   remove it from the agents you pick
+  npx desktop-recorder-mcp uninstall [options]   remove everything it put on this computer, after asking
   npx desktop-recorder-mcp app                    open Desktop Recorder: record a task and play it again, without AI
   npx desktop-recorder-mcp@latest update          install this version for the agents already set up, without asking
 
@@ -30,12 +30,13 @@ Options:
   --all          every agent found on this computer, without asking
   --dry-run      say what would change, change nothing
   --home DIR     act on another home folder (for tests)
-  --remove-program   with uninstall: also delete the programs (recordings and saved passwords are kept)
+  --yes          with uninstall: do not ask before removing everything
+                 (uninstall --agents a,b only removes it from those agents and keeps the rest)
   --restart-app  with update: open Desktop Recorder again when it is done
   -h, --help     this help`;
 
 function parse(argv) {
-  const options = { command: 'install', agents: null, all: false, dryRun: false, home: null, removeProgram: false, restartApp: false };
+  const options = { command: 'install', agents: null, all: false, dryRun: false, home: null, removeProgram: false, restartApp: false, yes: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (['install', 'status', 'uninstall', 'app', 'update'].includes(arg)) options.command = arg;
@@ -45,6 +46,7 @@ function parse(argv) {
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--home') options.home = argv[++i];
     else if (arg === '--remove-program') options.removeProgram = true;
+    else if (arg === '--yes' || arg === '-y') options.yes = true;
     else if (arg === '-h' || arg === '--help') options.command = 'help';
     else throw new Error(`Unknown option ${arg}; see --help`);
   }
@@ -106,6 +108,19 @@ async function main() {
   if (options.command === 'status') return status(run).forEach((line) => console.log(line));
   if (options.command === 'app') return openApp(home);
   if (options.command === 'update') return update(home, run, options.restartApp);
+
+  // Uninstall removes everything (stopping its programs, every agent's server, saved passwords and
+  // folders) unless agents are named: then only those agents.
+  if (options.command === 'uninstall' && !options.agents) {
+    const steps = plan(run);
+    if (!options.dryRun && !options.yes) {
+      console.log('This removes desktop-recorder-mcp completely:');
+      steps.forEach((line) => console.log(`  - ${line}`));
+      if (!process.stdin.isTTY) throw new Error('No terminal to ask in: pass --yes to remove everything listed above');
+      if (!(await confirm('Remove all of it?', false))) return console.log('Nothing changed.');
+    }
+    return removeEverything(run).forEach((line) => console.log(line));
+  }
 
   const known = agents(home, env);
   const found = known.filter((a) => a.detect());

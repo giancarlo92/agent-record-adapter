@@ -36,8 +36,15 @@ for (const skill of [...OFFICIAL_SKILLS, ...OUR_SKILLS]) {
 process.env.DESKTOP_RECORDER_MCP_VENDOR = vendor;
 process.env.DESKTOP_RECORDER_MCP_SKILLS = skills;
 
+// Every folder a test makes is removed when the tests end: nothing is left in the temp folder.
+const made = [fixtures];
+test.after(() => {
+  for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function fakeHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'adr-home-'));
+  made.push(home);
   const env = { APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), PATH: '' };
   for (const dir of ['.claude', '.codex', '.cursor', path.join('AppData', 'Roaming', 'Code', 'User')]) {
     fs.mkdirSync(path.join(home, dir), { recursive: true });
@@ -363,4 +370,57 @@ test('OpenCode is set up in its own format, and Windsurf is no longer offered', 
   uninstall(['opencode'], options);
   assert.ok(!JSON.parse(read(path.join(dir, 'opencode.json'))).mcp.servers[SERVER]);
   assert.ok(!fs.existsSync(path.join(dir, 'skills', 'desktop-recording')));
+});
+
+test('uninstall with --dry-run only says what it would remove', () => {
+  const { home, options } = fakeHome();
+  install(['claude-code'], options);
+  const where = layout(home);
+  const lines = uninstall(['claude-code'], { ...options, dryRun: true, removeProgram: true });
+  assert.match(lines.join('\n'), /would remove the MCP server/);
+  assert.match(lines.join('\n'), /Would remove the programs/);
+  const claude = JSON.parse(read(path.join(home, '.claude.json')));
+  assert.ok(claude.mcpServers[SERVER], 'the server is still set up');
+  assert.ok(fs.existsSync(path.join(home, '.claude', 'skills', 'agent-desktop')), 'the skills are still there');
+  assert.ok(fs.existsSync(where.bin), 'the programs are still there');
+});
+
+test('a complete uninstall leaves nothing of it, and keeps recordings in a folder the person chose', () => {
+  const { removeEverything, plan } = require('../lib/install');
+  const { home, options } = fakeHome();
+  install(['claude-code', 'codex', 'cursor'], options);
+  const where = layout(home);
+  const local = path.join(home, 'AppData', 'Local');
+  const chosen = path.join(home, 'MyRecordings');
+  fs.mkdirSync(path.join(chosen, 'Recording 1'), { recursive: true });
+  fs.writeFileSync(path.join(where.root, 'recorder.json'), JSON.stringify({ folder: chosen, video: false }));
+  fs.writeFileSync(path.join(where.root, 'secrets.json'), '[]');
+  fs.mkdirSync(path.join(local, 'DesktopRecorder', 'chrome-profile'), { recursive: true });
+  fs.mkdirSync(path.join(home, 'Documents', 'Desktop Recorder', 'Recording 2'), { recursive: true });
+  fs.mkdirSync(path.join(home, '.agent-desktop'), { recursive: true });
+  fs.mkdirSync(path.join(home, '.agent-browser'), { recursive: true });
+  const npx = path.join(local, 'npm-cache', '_npx', 'abc123');
+  fs.mkdirSync(path.join(npx, 'node_modules', 'desktop-recorder-mcp'), { recursive: true });
+  fs.writeFileSync(path.join(npx, 'package.json'), JSON.stringify({ dependencies: { 'desktop-recorder-mcp': '^1.0.0' } }));
+  const other = path.join(local, 'npm-cache', '_npx', 'def456');
+  fs.mkdirSync(other, { recursive: true });
+  fs.writeFileSync(path.join(other, 'package.json'), JSON.stringify({ dependencies: { cowsay: '^1.0.0' } }));
+  const cursorBackup = path.join(home, '.cursor', 'mcp.json.bak-desktop-recorder-mcp');
+  fs.writeFileSync(cursorBackup, '{}');
+
+  const listed = plan(options).join('\n');
+  assert.match(listed, /Keep your recordings in .*MyRecordings/);
+  assert.ok(fs.existsSync(where.bin), 'listing changes nothing');
+
+  removeEverything(options);
+  for (const gone of [where.root, path.join(local, 'DesktopRecorder'), path.join(home, 'Documents', 'Desktop Recorder'),
+    path.join(home, '.agent-desktop'), path.join(home, '.agent-browser'), npx, cursorBackup,
+    path.join(home, '.claude', 'skills', 'agent-desktop')]) {
+    assert.ok(!fs.existsSync(gone), `${gone} is removed`);
+  }
+  assert.ok(fs.existsSync(path.join(chosen, 'Recording 1')), 'recordings in the chosen folder stay');
+  assert.ok(fs.existsSync(other), "another package's npx folder stays");
+  const claude = JSON.parse(read(path.join(home, '.claude.json')));
+  assert.ok(!claude.mcpServers[SERVER]);
+  assert.ok(claude.mcpServers.other, "the agent's other servers stay");
 });

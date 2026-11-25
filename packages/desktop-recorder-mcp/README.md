@@ -69,7 +69,7 @@ agent-record secret delete bank-login
 npx desktop-recorder-mcp status                     # what is installed, and where
 npx desktop-recorder-mcp --agents claude-code,codex # set up these agents without asking
 npx desktop-recorder-mcp --dry-run                  # say what would change
-npx desktop-recorder-mcp uninstall                  # remove it from the agents you pick
+npx desktop-recorder-mcp uninstall                  # remove everything it put on this computer, after asking
 npx desktop-recorder-mcp app                        # open Desktop Recorder
 ```
 
