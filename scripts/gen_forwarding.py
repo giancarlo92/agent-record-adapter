@@ -19,7 +19,7 @@ TRAITS = [("ObservationOps", "observation.rs"), ("ActionOps", "actions.rs"),
 # Methods our background layer answers first (see hooks.rs).
 OURS = {"execute_action", "press_key_for_window", "launch_app", "window_op",
         "observe_tree", "get_live_element", "get_live_actions", "list_windows", "capture_signal_baseline",
-        "query_app_inventory"}
+        "query_app_inventory", "acquire_interaction_lease", "get_live_value"}
 
 
 def trait_body(src, name):

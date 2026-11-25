@@ -6,7 +6,7 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::process::ExitCode;
 
 use agent_desktop_core::commands::{
-    click_at, menu, navigate, record, record_background, secret, stroke, type_window,
+    click_at, close_window, menu, navigate, record, record_background, secret, stroke, type_window,
 };
 use agent_desktop_core::context::CommandContext;
 use agent_desktop_core::response::output::{ErrorPayload, Response};
@@ -22,9 +22,12 @@ const OURS: &[&str] = &[
     "stroke",
     "menu",
     "click-at",
+    "close-window",
     "navigate",
     "browser",
     "list-displays",
+    "check-scripts",
+    "script-steps",
 ];
 
 pub(crate) fn is_ours(command: &str) -> bool {
@@ -72,9 +75,12 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Stroke(_) => "stroke",
         Commands::Menu(_) => "menu",
         Commands::ClickAt(_) => "click-at",
+        Commands::CloseWindow(_) => "close-window",
         Commands::Navigate(_) => "navigate",
         Commands::Browser(_) => "browser",
         Commands::ListDisplays => "list-displays",
+        Commands::CheckScripts(_) => "check-scripts",
+        Commands::ScriptSteps(_) => "script-steps",
         Commands::External(_) => "external",
     }
 }
@@ -187,6 +193,7 @@ fn dispatch(
             },
             adapter,
         ),
+        Commands::CloseWindow(args) => close_window::execute(&args.window_id, adapter),
         Commands::ClickAt(args) => click_at::execute(
             click_at::ClickAtArgs {
                 app: args.scope.app,
@@ -213,9 +220,12 @@ fn dispatch(
                 &displays,
             ))
         }
-        Commands::Browser(_) | Commands::External(_) => Err(AppError::Internal(
-            "not a command agent-record runs itself".into(),
-        )),
+        Commands::Browser(_)
+        | Commands::CheckScripts(_)
+        | Commands::ScriptSteps(_)
+        | Commands::External(_) => Err(
+            AppError::Internal("not a command agent-record runs itself".into()),
+        ),
     }
 }
 
@@ -373,6 +383,70 @@ pub(crate) fn by_place(args: &[String]) -> Option<ExitCode> {
         Ok(data)
     });
     Some(emit(&parsed.command, result))
+}
+
+/// `get <ref> --property P` for a ref the engine refused as not unique (an
+/// unnamed field with a twin): the property read from the element found by
+/// its place, in `get`'s own answer.
+#[cfg(target_os = "windows")]
+pub(crate) fn read_by_place(args: &[String]) -> Option<ExitCode> {
+    use agent_desktop_core::ObservationOps;
+    if crate::first_command(args) != Some("get") {
+        return None;
+    }
+    let ref_id = args
+        .iter()
+        .skip_while(|arg| arg.as_str() != "get")
+        .find(|arg| arg.starts_with('@'))?
+        .clone();
+    let property = flag_value(args, "--property")?;
+    let session = flag_value(args, "--session");
+    let result = context(&session, &None, false).and_then(|context| {
+        let entry = agent_desktop_core::commands::helpers::load_ref_entry(&ref_id, &context)?;
+        with_adapter(|_| Ok(()))?;
+        let adapter = agent_record_windows::WindowsAdapter::new();
+        let element = agent_record_windows::twins::find_by_place(&entry)?;
+        let handle = element.into_native_handle();
+        let deadline = agent_desktop_core::Deadline::standard()?;
+        let non_blank = |text: Option<String>| text.filter(|text| !text.trim().is_empty());
+        let value = match property.as_str() {
+            "value" => Value::from(
+                adapter
+                    .get_live_value(&handle, deadline)?
+                    .or(entry.identity.value.clone()),
+            ),
+            "text" => Value::from(
+                non_blank(adapter.get_live_value(&handle, deadline)?)
+                    .or(non_blank(entry.identity.name.clone())),
+            ),
+            "bounds" => serde_json::to_value(adapter.get_element_bounds(&handle, deadline)?)
+                .map_err(|error| AppError::Internal(error.to_string()))?,
+            "states" => Value::from(
+                adapter
+                    .get_live_state(&handle, deadline)?
+                    .map_or(entry.capabilities.states.clone(), |state| state.states),
+            ),
+            "role" => Value::from(entry.identity.role.clone()),
+            "title" => Value::from(entry.identity.name.clone()),
+            other => {
+                return Err(AppError::invalid_input(format!(
+                    "Unknown property '{other}'"
+                )));
+            }
+        };
+        Ok(serde_json::json!({
+            "property": property,
+            "ref": ref_id,
+            "value": value,
+            "resolved_by": "place",
+        }))
+    });
+    Some(emit("get", result))
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn read_by_place(_args: &[String]) -> Option<ExitCode> {
+    None
 }
 
 #[cfg(not(target_os = "windows"))]

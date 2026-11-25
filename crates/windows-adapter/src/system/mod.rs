@@ -3,6 +3,7 @@
 //! unmodified upstream adapter through its public traits; the rest are small
 //! copies of upstream's private helpers (Apache-2.0).
 
+pub(crate) mod desktop_lease;
 pub(crate) mod separate_launch;
 pub(crate) mod work_desktop;
 

@@ -110,7 +110,7 @@ impl core::ObservationOps for WindowsAdapter {
         handle: &NativeHandle,
         deadline: Deadline,
     ) -> Result<Option<String>, AdapterError> {
-        self.inner.get_live_value(handle, deadline)
+        self.ours_get_live_value(handle, deadline)
     }
     fn get_text_selection(
         &self,
@@ -294,7 +294,7 @@ impl core::SystemOps for WindowsAdapter {
         &self,
         deadline: Deadline,
     ) -> Result<InteractionLease, AdapterError> {
-        self.inner.acquire_interaction_lease(deadline)
+        self.ours_acquire_interaction_lease(deadline)
     }
     fn permission_report(&self, deadline: Deadline) -> Result<PermissionReport, AdapterError> {
         self.inner.permission_report(deadline)

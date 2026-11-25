@@ -24,7 +24,7 @@ use serde_json::{Map, Value, json};
 
 use crate::catalog;
 
-const INSTRUCTIONS: &str = "Agent Record Adapter: desktop apps through the desktop_* tools (agent-desktop, with a background-first layer: actions do not take the person's mouse, keyboard or foreground), web pages through the agent_browser_* tools (agent-browser, in a dedicated Chrome that stays in the background). Pages in the person's own browser without DevTools are desktop windows: use desktop_snapshot/desktop_click there, and desktop_navigate to change its address. Extra tools: desktop_menu (a menu bar command without opening the menu), desktop_click_at (a point of a window), desktop_stroke, desktop_secret_list/desktop_secret_fill (passwords by name, never their value), desktop_record_start/stop/status (record a person's or your own actions to a JSON Lines file). Read desktop_skills_get with name \"background\" first, then \"recording\", \"recording-to-script\" or \"script-repair\" when the task is about recordings or scripts.";
+const INSTRUCTIONS: &str = "Agent Record Adapter: desktop apps through the desktop_* tools (agent-desktop, with a background-first layer: actions do not take the person's mouse, keyboard or foreground), web pages through the agent_browser_* tools (agent-browser, in a dedicated Chrome that stays in the background). Pages in the person's own browser without DevTools are desktop windows: use desktop_snapshot/desktop_click there, and desktop_navigate to change its address. Extra tools: desktop_menu (a menu bar command without opening the menu), desktop_click_at (a point of a window), desktop_close_window (one window, as its Close button does), desktop_stroke, desktop_secret_list/desktop_secret_fill (passwords by name, never their value), desktop_record_start/stop/status (record a person's or your own actions to a JSON Lines file). Read desktop_skills_get with name \"background\" first, then \"recording\", \"recording-to-script\" or \"script-repair\" when the task is about recordings or scripts.";
 const CHILD_TIMEOUT: Duration = Duration::from_secs(60);
 /// Commands an MCP client must not run: a person types these at a terminal.
 const NOT_TOOLS: &[&str] = &[
@@ -94,6 +94,14 @@ impl Upstream {
         Ok(upstream)
     }
 
+    /// Ends the child server (it was replaced by one started otherwise).
+    fn stop(&self) {
+        if let Ok(mut child) = self._child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
     fn send(&self, message: &Value) {
         if let Ok(mut stdin) = self.stdin.lock() {
             let _ = serde_json::to_writer(&mut *stdin, message);
@@ -136,9 +144,18 @@ struct Server {
     /// The dedicated Chrome and proxy of agent-browser's server, started at
     /// its first tool call that needs a page.
     browser: Option<agent_record_browser::LazyBrowser>,
-    upstreams: Vec<Arc<Upstream>>,
+    /// The engine's server first, then agent-browser's. The engine's is
+    /// started again in a session of its own when the drawn cursor is first
+    /// turned on (`ensure_session`).
+    upstreams: Mutex<Vec<Arc<Upstream>>>,
+    /// Where every answer and notification goes (stdout, one writer).
+    out: Out,
     ours: Vec<catalog::Tool>,
-    globals: Vec<String>,
+    globals: Mutex<Vec<String>>,
+    /// The client's `initialize` parameters, to initialize a restarted server.
+    init: Mutex<Option<Value>>,
+    /// Held while a session of the server's own is being started.
+    starting_session: Mutex<()>,
     routes: Mutex<HashMap<String, usize>>,
     notes: Vec<String>,
 }
@@ -174,12 +191,15 @@ pub(crate) fn serve(args: &[String]) -> ExitCode {
     }
     let server = Arc::new(Server {
         browser,
-        upstreams,
+        upstreams: Mutex::new(upstreams),
+        out: Arc::clone(&out),
         ours: catalog::tools()
             .into_iter()
             .filter(|tool| !NOT_TOOLS.contains(&tool.name.as_str()))
             .collect(),
-        globals,
+        globals: Mutex::new(globals),
+        init: Mutex::new(None),
+        starting_session: Mutex::new(()),
         routes: Mutex::new(HashMap::new()),
         notes,
     });
@@ -213,7 +233,7 @@ impl Server {
         let method = message["method"].as_str().unwrap_or_default().to_string();
         let Some(id) = message.get("id").cloned() else {
             // Notifications go to every upstream server.
-            for upstream in &self.upstreams {
+            for upstream in self.upstreams() {
                 upstream.send(&message);
             }
             return;
@@ -224,7 +244,7 @@ impl Server {
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({ "tools": self.list() })),
             "tools/call" => self.call(&params),
-            _ => match self.upstreams.first() {
+            _ => match self.upstreams().first() {
                 Some(engine) => engine.request(&method, &params),
                 None => Err(json!({ "code": -32601, "message": "Method not found" })),
             },
@@ -236,10 +256,79 @@ impl Server {
         write_line(out, &response);
     }
 
+    fn upstreams(&self) -> Vec<Arc<Upstream>> {
+        self.upstreams
+            .lock()
+            .map(|list| list.clone())
+            .unwrap_or_default()
+    }
+
+    fn globals(&self) -> Vec<String> {
+        self.globals
+            .lock()
+            .map(|list| list.clone())
+            .unwrap_or_default()
+    }
+
+    /// The drawn cursor belongs to a session. A server started without one
+    /// (`--session`) starts one the first time the cursor is turned on, and
+    /// runs every later call in it: the engine's server is started again with
+    /// `--session`, and our own commands get it too.
+    fn ensure_session(&self) -> Result<(), String> {
+        let _starting = self
+            .starting_session
+            .lock()
+            .map_err(|_| "the session could not be started".to_string())?;
+        if self.globals().iter().any(|arg| arg == "--session") {
+            return Ok(());
+        }
+        let started = self.run_self(&["session".into(), "start".into()], "session start");
+        let id = started["structuredContent"]["data"]["session_id"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("session start failed: {}", started["content"][0]["text"]))?;
+        let mut globals = self.globals();
+        globals.push("--session".into());
+        globals.push(id);
+        let mut engine_args = globals.clone();
+        engine_args.push("mcp".into());
+        let command = crate::engine::command(&engine_args)?;
+        let engine = Upstream::spawn("agent-desktop", command, Arc::clone(&self.out))?;
+        let init = self
+            .init
+            .lock()
+            .ok()
+            .and_then(|init| init.clone())
+            .unwrap_or_else(|| json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "agent-record", "version": "1" } }));
+        engine.request("initialize", &init).map_err(|error| {
+            format!("the engine's server did not start in the session: {error}")
+        })?;
+        engine.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+        if let Ok(mut list) = self.upstreams.lock() {
+            match list
+                .iter()
+                .position(|upstream| upstream.name == "agent-desktop")
+            {
+                Some(at) => {
+                    let old = std::mem::replace(&mut list[at], engine);
+                    old.stop();
+                }
+                None => list.insert(0, engine),
+            }
+        }
+        if let Ok(mut list) = self.globals.lock() {
+            *list = globals;
+        }
+        Ok(())
+    }
+
     fn initialize(&self, params: &Value) -> Value {
+        if let Ok(mut init) = self.init.lock() {
+            *init = Some(params.clone());
+        }
         let mut instructions = vec![INSTRUCTIONS.to_string()];
         let mut protocol = params["protocolVersion"].clone();
-        for upstream in &self.upstreams {
+        for upstream in self.upstreams() {
             if let Ok(result) = upstream.request("initialize", params) {
                 if upstream.name == "agent-desktop" {
                     protocol = result["protocolVersion"].clone();
@@ -262,7 +351,7 @@ impl Server {
         let mut tools = Vec::new();
         let mut routes = HashMap::new();
         let ours: Vec<&str> = self.ours.iter().map(|tool| tool.name.as_str()).collect();
-        for (index, upstream) in self.upstreams.iter().enumerate() {
+        for (index, upstream) in self.upstreams().iter().enumerate() {
             let Ok(result) = upstream.request("tools/list", &json!({})) else {
                 continue;
             };
@@ -296,6 +385,21 @@ impl Server {
             let arguments = params["arguments"].as_object().cloned().unwrap_or_default();
             return Ok(self.call_skills(&name, &arguments));
         }
+        // A browser started with DevTools and a profile of its own runs
+        // through agent-record's launch (see `launch_cdp.rs`): upstream's own
+        // refuses while any instance of that browser runs.
+        if name == "desktop_launch"
+            && let Some(argv) = launch_cdp_argv(&params["arguments"])
+        {
+            return Ok(self.run_self(&argv, "launch"));
+        }
+        if name.starts_with("desktop_cursor_overlay_")
+            && let Err(message) = self.ensure_session()
+        {
+            return Ok(tool_error(&format!(
+                "The drawn cursor needs a session, and none could be started: {message}"
+            )));
+        }
         let route = |server: &Self| {
             server
                 .routes
@@ -310,7 +414,7 @@ impl Server {
                 route(self)
             }
         };
-        match index.and_then(|index| self.upstreams.get(index)) {
+        match index.and_then(|index| self.upstreams().get(index).cloned()) {
             Some(upstream) => {
                 if upstream.name == BROWSER
                     && agent_record_browser::tool_needs_browser(&name)
@@ -363,7 +467,7 @@ impl Server {
             Err(error) => return tool_error(&format!("Cannot locate agent-record: {error}")),
         };
         let output = Command::new(exe)
-            .args(&self.globals)
+            .args(self.globals())
             .args(argv)
             .stdin(Stdio::null())
             .output();
@@ -388,6 +492,54 @@ impl Server {
             )),
         }
     }
+}
+
+/// `desktop_launch`'s arguments as an `agent-record launch` command line, when
+/// they ask for DevTools (`cdp`) with a profile of the browser's own;
+/// `None` otherwise (upstream's tool runs them).
+fn launch_cdp_argv(arguments: &Value) -> Option<Vec<String>> {
+    let app = arguments["app"].as_str()?;
+    let args: Vec<String> = arguments["args"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let cdp = arguments.get("cdp").filter(|cdp| !cdp.is_null())?;
+    if !args.iter().any(|arg| arg.contains("--user-data-dir")) {
+        return None;
+    }
+    let mut argv = vec!["launch".to_string(), app.to_string(), "--cdp".to_string()];
+    if let Some(port) = cdp.as_u64().filter(|port| *port > 0) {
+        argv.push(port.to_string());
+    }
+    for arg in args {
+        argv.push(format!("--arg={arg}"));
+    }
+    if let Some(timeout) = arguments["timeout"].as_u64() {
+        argv.push("--timeout".into());
+        argv.push(timeout.to_string());
+    }
+    if let Some(cwd) = arguments["cwd"].as_str() {
+        argv.push("--cwd".into());
+        argv.push(cwd.to_string());
+    }
+    for pair in arguments["env"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        argv.push("--env".into());
+        argv.push(pair.to_string());
+    }
+    if arguments["activate"].as_bool() == Some(true) {
+        argv.push("--activate".into());
+    }
+    Some(argv)
 }
 
 fn tool_error(message: &str) -> Value {

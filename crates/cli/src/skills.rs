@@ -48,6 +48,11 @@ const SKILLS: &[Skill] = &[
     },
 ];
 
+/// The desktop-script.mjs this agent-record installs with its skills.
+pub(crate) fn helper_source() -> &'static str {
+    include_str!("../../../skills/recording-to-script/scripts/desktop-script.mjs")
+}
+
 fn find(name: &str) -> Option<&'static Skill> {
     SKILLS
         .iter()

@@ -1,5 +1,6 @@
 // Part of Agent Record Adapter (see NOTICE).
 pub mod click_at;
+pub mod close_window;
 pub mod menu;
 pub mod navigate;
 pub mod record;

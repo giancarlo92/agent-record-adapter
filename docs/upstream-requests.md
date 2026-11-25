@@ -9,5 +9,6 @@ None is needed for it to work; each would remove a workaround.
 | agent-desktop | `LaunchOptions` field to start the first window without activation (`SW_SHOWNOACTIVATE`) | `system/separate_launch.rs` for ordinary launches |
 | agent-desktop | `launch --no-attach` allowed when the arguments give the program its own profile | the `--no-attach` rewrite in `crates/cli/src/main.rs` and part of `separate_launch.rs` |
 | agent-desktop | `list-displays` with a 1-based `number` | `run::list_displays` in the front |
+| agent-desktop | A `close-window` that closes one window (only `close-app`, every window of an app, exists; its guide asks to click the Close button, whose name depends on the language) | `close-window` in our layer (`actions/close_window.rs`) |
 | agent-desktop | The TCP listener table read on builds that report the state as 0 (`tcp_listener.rs`, fixed in the old fork) | — (DevTools port attribution of `launch --cdp`) |
 | agent-browser | An option to keep `Target.activateTarget`/`Page.bringToFront` off and focus emulation on (a "background" mode) | the proxy's swallowing (it would still be needed for recording) |

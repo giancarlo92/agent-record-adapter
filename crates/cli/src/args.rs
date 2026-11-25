@@ -53,6 +53,11 @@ pub(crate) enum Commands {
     )]
     ClickAt(ClickAtArgs),
     #[command(
+        name = "close-window",
+        about = "Close one window as its own Close button does (an app may ask to save first), without taking the focus; close-app closes every window of an app"
+    )]
+    CloseWindow(CloseWindowArgs),
+    #[command(
         about = "Open an address in the tab a browser window without DevTools shows (the person's own browser), through its address bar, never taking the focus; pages with DevTools: use `browser`"
     )]
     Navigate(NavigateArgs),
@@ -65,9 +70,40 @@ pub(crate) enum Commands {
         about = "List the displays with their number (1, 2, ...), id, bounds and scale; record --display takes the number"
     )]
     ListDisplays,
+    #[command(
+        name = "check-scripts",
+        about = "Check scripts that use agent-record, agent-desktop or agent-browser against the programs installed here, without running them: every call's command, options and values, program paths, desktop-script.mjs copies and saved password names"
+    )]
+    CheckScripts(CheckScriptsArgs),
+    #[command(
+        name = "script-steps",
+        about = "The steps of a script made from a recording, as JSON, without running it: its title, values, windows and each step's actions (open a browser, find an element and set its value, a menu command...), and what cannot be known without running it"
+    )]
+    ScriptSteps(ScriptStepsArgs),
     /// Any other command: the engine gets the whole command line as it was.
     #[command(external_subcommand)]
     External(#[allow(dead_code)] Vec<String>),
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct CloseWindowArgs {
+    #[arg(help = "The window to close (w-<id> from list-windows)")]
+    pub window_id: String,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct ScriptStepsArgs {
+    #[arg(help = "The script file (.mjs/.js using desktop-script.mjs; or .py, .ps1, .sh, .cmd calling agent-record)")]
+    pub file: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub(crate) struct CheckScriptsArgs {
+    #[arg(
+        required = true,
+        help = "Script files or folders (searched inside, skipping node_modules, .git, target and build folders)"
+    )]
+    pub paths: Vec<PathBuf>,
 }
 
 #[derive(Args, Debug)]

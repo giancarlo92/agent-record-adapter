@@ -40,7 +40,11 @@ pub(crate) fn command(args: &[String]) -> Result<Command, String> {
 /// the element's place (see the Windows crate's `twins.rs`).
 pub(crate) fn run(args: &[String]) -> ExitCode {
     if crate::run::ref_action(args).is_some() {
-        return run_ref_action(args);
+        return run_ref_action(args, crate::run::by_place);
+    }
+    // A read of a ref with a twin is read by its place too.
+    if crate::first_command(args) == Some("get") && args.iter().any(|arg| arg.starts_with('@')) {
+        return run_ref_action(args, crate::run::read_by_place);
     }
     if crate::first_command(args) == Some("find") {
         return crate::run::find(args);
@@ -69,7 +73,7 @@ pub(crate) fn envelope(args: &[String]) -> Result<serde_json::Value, String> {
         .map_err(|error| format!("The engine gave no JSON envelope: {error}"))
 }
 
-fn run_ref_action(args: &[String]) -> ExitCode {
+fn run_ref_action(args: &[String], by_place: fn(&[String]) -> Option<ExitCode>) -> ExitCode {
     let output = match command(args).and_then(|mut command| {
         command
             .stdin(std::process::Stdio::inherit())
@@ -90,7 +94,7 @@ fn run_ref_action(args: &[String]) -> ExitCode {
         envelope["error"]["code"] == "AMBIGUOUS_TARGET"
             && envelope["error"]["details"]["kind"] == "identity_not_unique"
     });
-    if twin && let Some(code) = crate::run::by_place(args) {
+    if twin && let Some(code) = by_place(args) {
         return code;
     }
     use std::io::Write;

@@ -140,7 +140,7 @@ impl WindowsAdapter {
         let separate = crate::system::separate_launch::has_own_profile(&options.args)
             || crate::system::work_desktop::active();
         if separate && exe.is_absolute() && exe.is_file() {
-            let start = crate::actions::focus_guard::launch_start();
+            let start = crate::actions::focus_guard::launch_start_guarded(exe);
             let result = crate::system::separate_launch::launch(id, options, &self.inner)?;
             crate::actions::focus_guard::after_launch(
                 start,
@@ -166,7 +166,7 @@ impl WindowsAdapter {
         options: &core::system::launch_options::LaunchOptions,
         lease: &InteractionLease,
     ) -> Result<core::system::launch_result::LaunchResult, AdapterError> {
-        let start = crate::actions::focus_guard::launch_start();
+        let start = crate::actions::focus_guard::launch_start_guarded(std::path::Path::new(id));
         let result = self.inner.launch_app(id, options, lease)?;
         crate::actions::focus_guard::after_launch(
             start,
@@ -256,6 +256,41 @@ impl WindowsAdapter {
     /// its frame (ApplicationFrameHost.exe): every command that resolves a
     /// window's app (press --window-id) found none. An exact query for an app
     /// the list has not, which owns listed windows, gets it from them.
+    /// On a work desktop, the lease is that desktop's own (see
+    /// `system/desktop_lease.rs`): a bot there does not wait for the agents on
+    /// the person's desktop, nor they for it. A lease handed down by a parent
+    /// process, and every lease on the person's desktop, is upstream's.
+    pub(crate) fn ours_acquire_interaction_lease(
+        &self,
+        deadline: Deadline,
+    ) -> Result<InteractionLease, AdapterError> {
+        let inherited = std::env::var_os("AGENT_DESKTOP_INTERACTION_LEASE_HANDLE").is_some();
+        if background::enabled() && !inherited {
+            if let Some(lease) = crate::system::desktop_lease::acquire(deadline) {
+                return lease;
+            }
+        }
+        self.inner.acquire_interaction_lease(deadline)
+    }
+
+    /// A web date field whose own value Chromium has not reported (yet) is
+    /// read as the date its segments show (see `date_segments::shown_date`).
+    pub(crate) fn ours_get_live_value(
+        &self,
+        handle: &NativeHandle,
+        deadline: Deadline,
+    ) -> Result<Option<String>, AdapterError> {
+        let value = self.inner.get_live_value(handle, deadline)?;
+        if background::enabled()
+            && value.as_deref().is_none_or(str::is_empty)
+            && let Ok(element) = crate::tree::uia_element(handle)
+            && let Some(date) = crate::actions::date_segments::shown_date(&element.0)
+        {
+            return Ok(Some(date));
+        }
+        Ok(value)
+    }
+
     pub(crate) fn ours_query_app_inventory(
         &self,
         query: core::AppInventoryQuery<'_>,
@@ -395,5 +430,14 @@ fn background_evidence(handle: &NativeHandle, live: &mut LiveElement) {
         if selected && !checked {
             live.state.states.push(tree::state::CHECKED.to_string());
         }
+    }
+    // A web date field whose own value Chromium has not reported (yet) holds
+    // the date its segments show (see `date_segments::shown_date`).
+    if role == "textfield"
+        && live.state.value.as_deref().is_none_or(str::is_empty)
+        && let Ok(element) = crate::tree::uia_element(handle)
+        && let Some(date) = crate::actions::date_segments::shown_date(&element.0)
+    {
+        live.state.value = Some(date);
     }
 }

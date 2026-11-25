@@ -7,7 +7,7 @@ description: >
   How to use agent-record (Agent Record Adapter) so desktop apps and web pages are operated in the
   background, without the person's mouse, keyboard or foreground: the background-first route of
   every action, the commands agent-record adds to the official agent-desktop (menu, click-at,
-  navigate, press --window-id with Ctrl/Alt/Shift, type w-<id>, secret, record, stroke), web pages
+  navigate, press --window-id with Ctrl/Alt/Shift, type w-<id>, close-window, secret, record, stroke), web pages
   through the official agent-browser (`agent-record browser ...`), the person's own browser without
   DevTools, and the drawn cursor. It complements the official agent-desktop, agent-desktop-windows
   and agent-browser skills; read those for each command's own options. Triggers on: "in the
@@ -55,12 +55,14 @@ agent-record click-at --window-id w-123 1140 734 --double
 agent-record navigate --window-id w-55 https://example.com             # a browser window's address, in the background
 agent-record press ctrl+s --window-id w-123                            # a shortcut, in that window only
 agent-record type w-123 "Hello"                                        # type into the focused field of a canvas editor
+agent-record close-window w-123                                        # close one window, as its Close button does
 ```
 
 - `menu` works on classic menu bars (Win32 menus: SWT and Eclipse apps, Notepad, many older apps), which only open in the window in front. A disabled item fails; a name it does not have fails with `details.items`. Menus that are part of the window (Office ribbons, most modern apps) are in the accessibility tree: use `click`. A menu command acts on what the app has active: check the window title or selected tab before Execute or Delete.
 - `click-at` takes pixels of the window's `screenshot` (from its top-left corner) and clicks with posted messages. Use it for a results grid, a canvas or a chart; read the result with another `screenshot`.
 - `type w-<id>` is for an editor that draws its page itself and has no element to point at. It fails with `ACTION_FAILED` when the text did not arrive, never silently. Some canvas editors take text only while really active: then `--headed` is the way.
 - `navigate` without DevTools goes through the address bar; with `--in-app` a single-page app changes route the way its own links do.
+- `close-window` closes one window (agent-desktop's `close-app` closes every window of an app). It answers `closed: false` when the app asked something first, such as whether to save: answer that dialog like any window.
 
 ## Web pages: agent-browser, and the person's own browser
 

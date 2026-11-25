@@ -395,6 +395,9 @@ pub(crate) fn show_behind_if_minimized(top: HWND) {
     if unsafe { IsIconic(top) } == 0 {
         return;
     }
+    // Restored behind the person's windows: nobody takes the foreground
+    // while it is shown and laid out again (see `behind::foreground_lock`).
+    let _lock = crate::actions::behind::foreground_lock::hold();
     // An always-on-top window keeps floating (see `behind::is_topmost`).
     let floating = crate::actions::behind::is_topmost(top);
     let behind = |window: HWND| unsafe {
@@ -510,7 +513,7 @@ pub(crate) fn active_document(root: &UIElement, client: &UIAutomation) -> Option
 }
 
 /// The address of the page the window shows (its active tab's document).
-fn page_address(top: HWND, client: &UIAutomation) -> Option<String> {
+pub(crate) fn page_address(top: HWND, client: &UIAutomation) -> Option<String> {
     let root = client
         .element_from_handle(Handle::from(top as isize))
         .ok()?;
@@ -631,9 +634,21 @@ pub(crate) fn navigate(
             }));
         }
     }
-    Ok(serde_json::json!({
-        "window": window.id, "from": from, "url": now, "reached": false, "in_app": false,
-    }))
+    Err(not_reached(url, now.as_deref()))
+}
+
+/// The answer when the tab did not end at the address asked for: the address
+/// was delivered (something loaded), so it is not tried again on its own.
+pub(crate) fn not_reached(url: &str, now: Option<&str>) -> AdapterError {
+    AdapterError::new(
+        ErrorCode::ActionFailed,
+        format!(
+            "The tab is at {} instead of {url}",
+            now.unwrap_or("an unknown address")
+        ),
+    )
+    .with_details(serde_json::json!({ "asked": url, "url": now, "reached": false }))
+    .with_disposition(agent_desktop_core::DeliverySemantics::delivered_unverified())
 }
 
 #[cfg(test)]

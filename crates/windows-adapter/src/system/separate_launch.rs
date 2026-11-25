@@ -156,15 +156,33 @@ fn wait_for_window(
         focused_only: false,
         app: None,
     };
+    // The program's own window, not a helper one of its toolkit: winit keeps
+    // a small untitled event window on its thread, shown before the main one.
+    // A titled window is waited for a moment; failing one, any of its own.
+    let titled_wait = Instant::now() + Duration::from_secs(3);
     loop {
         if let Ok(deadline) = Deadline::after(2_000)
             && let Ok(windows) = upstream.list_windows(&filter, deadline)
         {
-            let mine: Vec<_> = windows.into_iter().filter(|w| matches(w)).collect();
-            if let Some(first) = mine
+            let mine: Vec<_> = windows
+                .into_iter()
+                .filter(|w| matches(w) && !toolkit_helper(w))
+                .collect();
+            let area = |w: &&agent_desktop_core::WindowInfo| {
+                w.bounds.map_or(0.0, |b| b.width * b.height) as i64
+            };
+            let titled = mine
                 .iter()
-                .find(|w| w.state.visible == Some(true))
-                .or(mine.first())
+                .filter(|w| w.state.visible == Some(true) && !w.title.trim().is_empty())
+                .max_by_key(area);
+            if let Some(window) = titled {
+                return Some(window.clone());
+            }
+            if Instant::now() >= titled_wait
+                && let Some(first) = mine
+                    .iter()
+                    .find(|w| w.state.visible == Some(true))
+                    .or(mine.first())
             {
                 return Some(first.clone());
             }
@@ -174,6 +192,21 @@ fn wait_for_window(
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+/// A window a UI toolkit makes for itself (winit's event target), never one
+/// of the program's own.
+fn toolkit_helper(window: &agent_desktop_core::WindowInfo) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW;
+    let Ok(hwnd) = crate::system::window::window_ops::parse_window_id(&window.id) else {
+        return false;
+    };
+    let mut name = [0u16; 64];
+    // SAFETY: a buffer of the length given; a stale handle answers 0.
+    let len = unsafe { GetClassNameW(hwnd as _, name.as_mut_ptr(), name.len() as i32) };
+    len > 0
+        && String::from_utf16_lossy(&name[..len as usize])
+            == crate::actions::posted_keys::WINIT_EVENT_TARGET
 }
 
 /// Starts `exe` (a full path) with `options`, behind the person's windows,

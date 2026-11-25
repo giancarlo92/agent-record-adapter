@@ -80,6 +80,16 @@ pub trait RecordOps {
         Err(AdapterError::not_supported("click_at"))
     }
 
+    /// Asks `window` to close, as its own Close button does, without taking
+    /// the focus; true when it closed (an app may ask to save first).
+    fn close_window(
+        &self,
+        _window: &WindowInfo,
+        _lease: &InteractionLease,
+    ) -> Result<bool, AdapterError> {
+        Err(AdapterError::not_supported("close_window"))
+    }
+
     /// Types text into a window (its focused field, else its document)
     /// without the person's keyboard or foreground (`type w-<id> TEXT`).
     fn type_in_window(

@@ -13,6 +13,8 @@
 
 mod args;
 mod catalog;
+mod check_scripts;
+mod script_steps;
 mod engine;
 mod labels;
 mod launch_cdp;
@@ -101,6 +103,8 @@ fn main() -> ExitCode {
         None => engine::run(rest),
         Some(args::Commands::External(_)) => engine::run(rest),
         Some(args::Commands::Browser(browser)) => agent_record_browser::run(browser.args),
+        Some(args::Commands::CheckScripts(check)) => check_scripts::run(check),
+        Some(args::Commands::ScriptSteps(steps)) => script_steps::run(steps),
         Some(command) => run::ours(&cli.session, &cli.agent_id, cli.headed, command),
     }
 }

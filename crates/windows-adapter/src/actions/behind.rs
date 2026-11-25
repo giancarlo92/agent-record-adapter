@@ -117,12 +117,81 @@ pub(crate) fn give_back(person: HWND, taken_by: HWND) {
     let theirs = unsafe { GetWindowThreadProcessId(taken_by, std::ptr::null_mut()) };
     let attached =
         theirs != 0 && theirs != own && unsafe { AttachThreadInput(own, theirs, 1) } != 0;
+    let locked = foreground_lock::pause();
     unsafe {
         BringWindowToTop(person);
         SetForegroundWindow(person);
     }
+    if locked {
+        foreground_lock::resume();
+    }
     if attached {
         unsafe { AttachThreadInput(own, theirs, 0) };
+    }
+}
+
+/// Keeps other programs from taking the foreground while an action runs.
+///
+/// Windows lets a program take the foreground only while the person has not
+/// used the keyboard or mouse for a while (the foreground lock timeout, 200 s
+/// by default) or when it was just started from the window in front. Then a
+/// browser told it is active (so it takes a click or keys behind the person's
+/// windows), or restored behind them, brings itself forward. In those same
+/// cases this process may lock the foreground (`LockSetForegroundWindow`),
+/// and then nobody else can take it; when it may not, nobody else may either,
+/// and the lock is not needed. The person's own clicks and Alt+Tab still
+/// switch windows (the system lifts the lock for them), and the lock ends
+/// with the action, or with this process.
+pub(crate) mod foreground_lock {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        LSFW_LOCK, LSFW_UNLOCK, LockSetForegroundWindow,
+    };
+
+    /// How many holders want the lock now, in this process.
+    static HOLDERS: AtomicUsize = AtomicUsize::new(0);
+
+    /// Held while an action runs; released when the last holder drops.
+    pub(crate) struct Held(());
+
+    pub(crate) fn hold() -> Held {
+        if HOLDERS.fetch_add(1, Ordering::SeqCst) == 0 {
+            // SAFETY: takes no pointers; fails harmlessly when not allowed.
+            let locked = unsafe { LockSetForegroundWindow(LSFW_LOCK) } != 0;
+            if std::env::var_os("AGENT_DESKTOP_GUARD_DEBUG").is_some() {
+                let error = std::io::Error::last_os_error();
+                eprintln!("foreground lock: taken={locked} ({error})");
+            }
+        }
+        Held(())
+    }
+
+    impl Drop for Held {
+        fn drop(&mut self) {
+            if HOLDERS.fetch_sub(1, Ordering::SeqCst) == 1 {
+                // SAFETY: as above.
+                unsafe { LockSetForegroundWindow(LSFW_UNLOCK) };
+            }
+        }
+    }
+
+    /// Lifts the lock for a moment (to give the person their window back);
+    /// true when it was held, so `resume` puts it back.
+    pub(crate) fn pause() -> bool {
+        let held = HOLDERS.load(Ordering::SeqCst) > 0;
+        if held {
+            // SAFETY: as above.
+            unsafe { LockSetForegroundWindow(LSFW_UNLOCK) };
+        }
+        held
+    }
+
+    pub(crate) fn resume() {
+        if HOLDERS.load(Ordering::SeqCst) > 0 {
+            // SAFETY: as above.
+            unsafe { LockSetForegroundWindow(LSFW_LOCK) };
+        }
     }
 }
 
@@ -161,9 +230,15 @@ pub(crate) fn window_op_without_activation(
         Ok(hwnd) => hwnd,
         Err(error) => return Some(Err(error)),
     };
+    // The window handles the change on its own thread a moment later: nobody
+    // takes the foreground meanwhile (see `foreground_lock`).
+    let _lock = foreground_lock::hold();
     // SAFETY: ShowWindowAsync takes any window handle; a stale one fails.
     let sent = unsafe { ShowWindowAsync(hwnd as HWND, show) } != 0
         || crate::tree::automation::window_exists(hwnd);
+    if sent {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
     let dispatched = if sent {
         Ok(())
     } else {

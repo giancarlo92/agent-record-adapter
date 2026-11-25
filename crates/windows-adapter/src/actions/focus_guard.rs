@@ -309,7 +309,12 @@ impl Guard {
         person: HWND,
         hold: Option<Arc<AtomicBool>>,
     ) -> Option<Self> {
-        if target.pid == 0 || (!person.is_null() && process_of(person) == target.pid) {
+        // A launch is guarded before its process exists (pid 0): its windows
+        // are the new ones and those of its program (`is_target_window`).
+        let launch = target.new_windows.is_some();
+        if (target.pid == 0 && !launch)
+            || (target.pid != 0 && !person.is_null() && process_of(person) == target.pid)
+        {
             return None;
         }
         let done = Arc::new(AtomicBool::new(false));
@@ -536,6 +541,9 @@ fn watch(
             hosts: Vec::new(),
         });
     });
+    // While the guard watches, nobody else takes the foreground (see
+    // `behind::foreground_lock`); it gives the person's window back itself.
+    let _lock = crate::actions::behind::foreground_lock::hold();
     let mut message: MSG = unsafe { std::mem::zeroed() };
     let hook =
         unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(before_key), std::ptr::null_mut(), 0) };
@@ -613,6 +621,8 @@ pub(crate) fn person_front() -> isize {
 pub(crate) struct LaunchStart {
     person: isize,
     windows: Vec<isize>,
+    /// A guard already watching while the program starts.
+    guard: Option<Guard>,
 }
 
 /// Takes what is on the person's screen before a launch (on the desktop on
@@ -621,7 +631,18 @@ pub(crate) fn launch_start() -> LaunchStart {
     input_desktop::run(|| LaunchStart {
         person: front() as isize,
         windows: top_windows(),
+        guard: None,
     })
+}
+
+/// `launch_start`, with a guard watching from before the program starts: a
+/// program started by one that may take the foreground (the person just
+/// typed in the terminal that runs it) activates its first window as soon as
+/// it shows, before the launch has found that window.
+pub(crate) fn launch_start_guarded(executable: &std::path::Path) -> LaunchStart {
+    let mut start = launch_start();
+    start.guard = Guard::for_launch(0, executable, &start);
+    start
 }
 
 /// How long a launch that showed no window yet is watched for one: a packaged
@@ -636,11 +657,12 @@ const LAUNCH_WAIT: Duration = Duration::from_secs(10);
 /// not (the program handed the start over to another process), the guard waits
 /// for a new window to show, up to `LAUNCH_WAIT`.
 pub(crate) fn after_launch(
-    start: LaunchStart,
+    mut start: LaunchStart,
     pid: u32,
     executable: &std::path::Path,
     shown: bool,
 ) {
+    let early = start.guard.take();
     input_desktop::run(|| {
         let person = start.person as HWND;
         let now = front();
@@ -651,7 +673,7 @@ pub(crate) fn after_launch(
             crate::actions::behind::give_back(person, now);
         }
     });
-    let Some(guard) = Guard::for_launch(pid, executable, &start) else {
+    let Some(guard) = early.or_else(|| Guard::for_launch(pid, executable, &start)) else {
         return;
     };
     if !shown {

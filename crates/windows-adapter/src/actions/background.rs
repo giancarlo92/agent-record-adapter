@@ -140,6 +140,12 @@ mod imp {
                         });
                     }
                     Action::SetValue(value) => {
+                        // A web date field takes its value only as typed digits.
+                        if let Some(steps) =
+                            crate::actions::date_segments::set(&element, value, lease.deadline())?
+                        {
+                            return Ok(ActionResult::from_execution(&request.action, steps));
+                        }
                         if let Some(steps) = crate::actions::background_value::background_set_value(
                             &element,
                             value,
@@ -149,8 +155,15 @@ mod imp {
                         }
                     }
                     Action::Select(value) => {
+                        // A component library's dropdown opens through its container;
+                        // a page's own list gets its option typed, never opened.
                         if let Some(steps) =
                             crate::actions::dropdown::select(&element, value, lease.deadline())?
+                        {
+                            return Ok(ActionResult::from_execution(&request.action, steps));
+                        }
+                        if let Some(steps) =
+                            crate::actions::web_select::select(&element, value, lease.deadline())?
                         {
                             return Ok(ActionResult::from_execution(&request.action, steps));
                         }

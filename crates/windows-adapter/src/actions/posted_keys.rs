@@ -343,6 +343,37 @@ fn handled(top: HWND, target: HWND) {
 
 /// Whether `top` is not the window the person is using: a window they use
 /// has the focus already, and is never told anything here.
+/// The class of the hidden window winit makes on every UI thread of its own.
+pub(crate) const WINIT_EVENT_TARGET: &str = "Winit Thread Event Target";
+
+/// Whether `top` is a window of a winit app (Rust: egui, WordCraft,
+/// GridCraft), known by the event target window winit keeps on its thread.
+/// winit's message loop makes no character from a posted key: it reads the
+/// character message that follows a key down as that key's text, so a key
+/// posted alone moves the caret or runs a shortcut but types nothing, and a
+/// grid that starts editing on typed text never starts. It gets the key with
+/// its character, as a real key press brings both; winit joins them into one
+/// event, so the character is not typed twice.
+pub(crate) fn is_winit(top: HWND) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumThreadWindows, GetClassNameW};
+    unsafe extern "system" fn check(window: HWND, found: isize) -> i32 {
+        let mut name = [0u16; 64];
+        let len = unsafe { GetClassNameW(window, name.as_mut_ptr(), name.len() as i32) };
+        if len > 0 && String::from_utf16_lossy(&name[..len as usize]) == WINIT_EVENT_TARGET {
+            unsafe { *(found as *mut bool) = true };
+            return 0;
+        }
+        1
+    }
+    let thread = unsafe { GetWindowThreadProcessId(top, std::ptr::null_mut()) };
+    if thread == 0 {
+        return false;
+    }
+    let mut found = false;
+    unsafe { EnumThreadWindows(thread, Some(check), &mut found as *mut bool as isize) };
+    found
+}
+
 fn is_behind(top: HWND) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
     unsafe {
@@ -661,7 +692,12 @@ fn press_posted(
             vec![step()],
         ));
     }
-    let mut messages = combo_messages(vk, None, mods);
+    // A winit window makes no character from a posted key: it takes the
+    // character that follows the key as the key's text (see `is_winit`).
+    let with_character = (is_winit(top) && !mods.ctrl && !mods.alt)
+        .then_some(character)
+        .flatten();
+    let mut messages = combo_messages(vk, with_character, mods);
     let releases = messages.split_off(messages.len() - mods.count());
     let post = |list: &[(u32, usize, isize)]| {
         list.iter().all(|(message, wparam, lparam)| unsafe {
@@ -817,13 +853,16 @@ pub(crate) fn type_text(
 /// do, down and up only.
 fn type_keys(top: HWND, text: &str, read: Option<&dyn Fn() -> Option<String>>) -> bool {
     ready(top);
+    // With nothing to read the text back from, a winit window gets each key
+    // with its character (see `is_winit`), any other window the key alone.
+    let unmeasured = is_winit(top);
     with_focus(top, key_target(top), || {
         let mut chars = text.chars();
         let (Some(first), Some(read)) = (chars.next(), read) else {
-            return type_keys_now(top, text, false);
+            return type_keys_now(top, text, unmeasured);
         };
         let Some(before) = read() else {
-            return type_keys_now(top, text, false);
+            return type_keys_now(top, text, unmeasured);
         };
         let rest: String = chars.collect();
         if !type_keys_now(top, &first.to_string(), true) {

@@ -17,7 +17,9 @@ There is no fork. Updating to a new upstream version is `scripts/update-upstream
 | Hidden work desktop (`AGENT_DESKTOP_WORK_DESKTOP=<name>`) | `crates/windows-adapter/src/system/work_desktop.rs` |
 | Recorder (a person's input through hooks + UI Automation, an agent's actions, MP4 video, indicator) | `crates/windows-adapter/src/input/record`, `crates/record` |
 | Secrets in the system's credential store, filled by name | `crates/record/src/commands/secret*.rs` |
-| `menu`, `click-at`, `navigate`, `stroke`, `type w-<id>`, `press --window-id` in the background | `crates/record`, `crates/windows-adapter` |
+| `menu`, `click-at`, `navigate`, `stroke`, `type w-<id>`, `press --window-id`, `close-window` in the background | `crates/record`, `crates/windows-adapter` |
+| `check-scripts`: checks scripts against the installed programs without running them (each call by the programs' own parsers, program paths, desktop-script.mjs copies, saved password names) | `crates/cli/src/check_scripts*` |
+| `script-steps`: the steps of a script made from a recording as JSON (title, values, windows, each step's actions, what cannot be known without running it), for bot runners | `crates/cli/src/script_steps*` |
 | Web pages through agent-browser, in a dedicated Chrome kept behind the person's windows, through a DevTools proxy | `crates/browser` |
 | The engine: upstream agent-desktop's own CLI and MCP server, compiled unmodified with our adapter | `crates/engine` |
 | `agent-record`: one CLI and one MCP server for all of it | `crates/cli` |
@@ -38,6 +40,8 @@ agent-record record start --app notepad.exe   # record a person or an agent
 agent-record browser open https://example.com # any agent-browser command
 agent-record browser snapshot -i
 agent-record mcp                              # one MCP server: desktop_* and agent_browser_* tools
+agent-record check-scripts C:\my\scripts       # after an update: which scripts no longer fit, and where
+agent-record script-steps C:\my\scripts\sign-up.mjs   # its steps as JSON, for a bot runner
 ```
 
 ## Build
